@@ -1,0 +1,29 @@
+<svg id="app-logo" width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#F59E0B" />
+      <stop offset="100%" stopColor="#D97706" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#bg-grad)"/>
+  
+  <!-- Minimalist Tuk-Tuk Icon -->
+  <path d="M120 370 V230 C120 160 180 150 256 150 C332 150 392 160 392 230 V370 H120Z" fill="#0F172A"/>
+  
+  <!-- Front window -->
+  <path d="M150 190 H362 V290 C362 315 320 325 256 325 C192 325 150 315 150 290 V190Z" fill="#FBBF24"/>
+  
+  <!-- Center Divider -->
+  <rect x="251" y="190" width="10" height="135" fill="#0F172A" opacity="0.8"/>
+  
+  <!-- Wheels -->
+  <circle cx="185" cy="400" r="45" fill="#0F172A"/>
+  <circle cx="185" cy="400" r="14" fill="#F59E0B"/>
+  
+  <circle cx="327" cy="400" r="45" fill="#0F172A"/>
+  <circle cx="327" cy="400" r="14" fill="#F59E0B"/>
+  
+  <!-- Headlight accents -->
+  <circle cx="155" cy="335" r="10" fill="#FDE047" opacity="0.9"/>
+  <circle cx="357" cy="335" r="10" fill="#FDE047" opacity="0.9"/>
+</svg>

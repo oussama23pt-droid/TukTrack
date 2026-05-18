@@ -1,0 +1,306 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "App user profile (Manager or Driver)",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "name": { "type": "string" },
+        "companyName": { "type": "string", "description": "Legal company name for billing" },
+        "address": { "type": "string", "description": "Full company address" },
+        "nif": { "type": "string", "description": "Portuguese Tax ID (NIF)" },
+        "businessName": { "type": "string", "description": "Trading name (deprecated in favor of companyName)" },
+        "role": { "type": "string", "enum": ["driver", "manager"] },
+        "managerId": { "type": "string", "description": "The UID of the manager. For drivers, this points to their manager. For managers, this is their own UID." },
+        "subscriptionStatus": { 
+          "type": "string", 
+          "enum": ["active", "expired", "cancelled", "cancelling", "payment_failed", "incomplete", "past_due", "unpaid", "none"] 
+        },
+        "planId": { "type": "string" },
+        "vehicleSlots": { "type": "integer" },
+        "currentPeriodEnd": { "type": "string", "format": "date-time" },
+        "vehicleId": { "type": "string" },
+        "activeTripId": { "type": "string" },
+        "isOnline": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "suspended", "inactive"] },
+        "pin": { "type": "string", "description": "6-digit access PIN for drivers" },
+        "termsAccepted": { "type": "boolean" },
+        "privacyAccepted": { "type": "boolean" },
+        "acceptedAt": { "type": "string", "format": "date-time" },
+        "location": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "updatedAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Trip": {
+      "title": "Trip",
+      "description": "Recorded tuktuk trip",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "driverUid": { "type": "string" },
+        "managerId": { "type": "string" },
+        "vehicleId": { "type": "string" },
+        "amount": { "type": "number" },
+        "passengers": { "type": "number" },
+        "duration": { "type": "number", "description": "Duration in minutes" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "completed", "cancelled"] },
+        "progress": {
+          "type": "object",
+          "properties": {
+            "completedStops": { 
+              "type": "array",
+              "items": { "type": "integer" }
+            },
+            "lastStopIndex": { "type": "integer" }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "driverUid", "managerId", "amount", "status"]
+    },
+    "SOSAlert": {
+      "title": "SOS Alert",
+      "description": "Emergency alert from driver",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "driverUid": { "type": "string" },
+        "managerId": { "type": "string" },
+        "location": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          }
+        },
+        "status": { "type": "string", "enum": ["active", "resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "Tuktuk vehicle in the management account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "managerId": { "type": "string" },
+        "plateNumber": { "type": "string" },
+        "color": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "maintenance", "service"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Route": {
+      "title": "Route",
+      "description": "Predefined business route",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "managerId": { "type": "string" },
+        "name": { "type": "string" },
+        "startPoint": { "type": "string" },
+        "endPoint": { "type": "string" },
+        "stops": { 
+          "type": "array",
+          "items": { 
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "note": { "type": "string" }
+            }
+          }
+        },
+        "coordinates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "lng": { "type": "number" },
+              "lat": { "type": "number" },
+              "type": { "type": "string" },
+              "name": { "type": "string" },
+              "note": { "type": "string" }
+            }
+          }
+        },
+        "geometry": { "type": "object" },
+        "color": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "managerId", "name", "startPoint", "endPoint"]
+    },
+    "Shift": {
+      "title": "Shift",
+      "description": "User operation shift",
+      "type": "object",
+      "properties": {
+        "managerId": { "type": "string" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "startedBy": { "type": "string" },
+        "startedByName": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "ended"] },
+        "endedAt": { "type": "string", "format": "date-time" },
+        "endedBy": { "type": "string" }
+      },
+      "required": ["managerId", "startedAt", "startedBy", "status"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "System or operational notification",
+      "type": "object",
+      "properties": {
+        "managerId": { "type": "string" },
+        "type": { "type": "string", "enum": ["gps_off_attempt", "sos", "info"] },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "driverUid": { "type": "string" },
+        "driverName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "read": { "type": "boolean" },
+        "isForDrivers": { "type": "boolean", "description": "If true, this notification is targeted at drivers. Otherwise, it is for managers." }
+      },
+      "required": ["managerId", "type", "title", "createdAt", "read"]
+    },
+    "SupportRequest": {
+      "title": "Support Request",
+      "description": "User message to app support team",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "subject": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "responded"] }
+      },
+      "required": ["email", "subject", "description", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/support_requests/{id}": {
+      "schema": "SupportRequest",
+      "description": "Messages sent to support"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Alerts and notifications"
+    },
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles (Managers and Drivers)"
+    },
+    "/users/{managerId}/transactions/{transactionId}": {
+      "schema": {
+        "title": "Transaction",
+        "description": "Log of subscription transactions.",
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "stripeSessionId": { "type": "string" },
+          "stripeSubscriptionId": { "type": "string" },
+          "planId": { "type": "string" },
+          "vehicleSlots": { "type": "integer" },
+          "amount": { "type": "number" },
+          "currency": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "Subscription history"
+    },
+    "/users/{managerId}/invoices/{invoiceId}": {
+      "schema": {
+        "title": "Invoice",
+        "description": "Subscription payment invoices.",
+        "type": "object",
+        "properties": {
+          "amount": { "type": "number" },
+          "currency": { "type": "string" },
+          "status": { "type": "string" },
+          "date": { "type": "string", "format": "date-time" },
+          "pdf": { "type": "string" },
+          "items": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "description": "Payment records"
+    },
+    "/vehicles/{vehicleId}": {
+      "schema": "Vehicle",
+      "description": "Assigned vehicles"
+    },
+    "/routes/{routeId}": {
+      "schema": "Route",
+      "description": "Predefined routes"
+    },
+    "/trips/{tripId}": {
+      "schema": "Trip",
+      "description": "Recorded trips"
+    },
+    "/sos_alerts/{alertId}": {
+      "schema": "SOSAlert",
+      "description": "Active SOS alerts"
+    },
+    "/drivers_init/{email}": {
+      "schema": "User",
+      "description": "Pre-registered drivers waiting for PIN-based first login"
+    },
+    "/shifts/{shiftId}": {
+      "schema": "Shift",
+      "description": "User operation shifts"
+    },
+    "/customers/{uid}/subscriptions/{id}": {
+      "schema": {
+        "title": "StripeSubscription",
+        "description": "Subscription doc managed by fire-stripe extension",
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "role": { "type": "string" }
+        }
+      },
+      "description": "Stripe subscription records"
+    },
+    "/customers/{uid}/portal_sessions/{id}": {
+      "schema": {
+        "title": "PortalSession",
+        "description": "Stripe Customer Portal session doc",
+        "type": "object",
+        "properties": {
+          "return_url": { "type": "string" },
+          "url": { "type": "string" }
+        }
+      },
+      "description": "Stripe portal sessions"
+    },
+    "/manager_subscriptions/{uid}": {
+      "schema": {
+        "title": "ManagerSubscription",
+        "description": "Persistent record of manager subscription status.",
+        "type": "object",
+        "properties": {
+          "managerId": { "type": "string" },
+          "subscriptionId": { "type": "string" },
+          "status": { "type": "string" },
+          "planId": { "type": "string" },
+          "vehicleSlots": { "type": "integer" },
+          "currentPeriodEnd": { "type": "string", "format": "date-time" },
+          "billingCycle": { "type": "string" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "lastWebhookEvent": { "type": "string" }
+        }
+      },
+      "description": "Subscription source of truth"
+    }
+  }
+}

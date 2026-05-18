@@ -1,0 +1,168 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // --- GLOBAL HELPERS ---
+    function isSignedIn() { return request.auth != null; }
+    function authUid() { return request.auth.uid; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    function getAuthUserData() { 
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; 
+    }
+    
+    function isManager() { 
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             (getAuthUserData().get('role', 'none') == 'manager' || getAuthUserData().get('role', 'none') == 'owner');
+    }
+
+    function getSubscriptionVault() {
+      return get(/databases/$(database)/documents/manager_subscriptions/$(request.auth.uid)).data;
+    }
+
+    function hasAvailableSlots() {
+      let slots = getAuthUserData().get('vehicleSlots', 1);
+      // Fallback to vault if users doc is out of sync
+      let vaultSlots = exists(/databases/$(database)/documents/manager_subscriptions/$(request.auth.uid)) ? 
+        getSubscriptionVault().get('vehicleSlots', 1) : slots;
+      let finalSlots = vaultSlots > slots ? vaultSlots : slots;
+      
+      // Basic count check (Note: For massive fleets, this is O(n), but for standard sub limits it's fine)
+      return firestore.size(/databases/$(database)/documents/vehicles, { 'managerId': request.auth.uid }) < finalSlots;
+    }
+    
+    function isValidId(id) { return id is string && id.size() <= 128; }
+
+    // --- DEFAULT DENY ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- COLLECTION RULES ---
+
+    match /users/{uid} {
+      allow get: if isSignedIn() && (
+        authUid() == uid || 
+        isManager() || 
+        (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == uid)
+      );
+      allow list: if isSignedIn() && (
+        resource.data.get('uid', '') == authUid() || 
+        resource.data.get('managerId', '') == authUid() ||
+        (request.auth.token.get('email', '') != '' && request.auth.token.email.lower() == resource.data.get('email', '').lower()) ||
+        isManager()
+      );
+      
+      // Allow creation of own profile or manager creating a driver profile
+      allow create: if isSignedIn() && (authUid() == uid || isManager());
+      
+      allow update: if isSignedIn() && (authUid() == uid || isManager());
+      
+      allow delete: if isSignedIn() && (
+        authUid() == uid || 
+        (isManager() && existing().get('managerId', '') == authUid()) ||
+        (existing().get('uid', '') == '' && request.auth.token.get('email', '') != '' && request.auth.token.email.lower() == existing().get('email', '').lower())
+      );
+    }
+
+    match /drivers_init/{email} {
+      // Drivers check this by email before account creation
+      allow get: if true; 
+      allow create: if isManager();
+      allow update, delete: if isSignedIn() && (
+        existing().managerId == authUid() ||
+        request.auth.token.email.lower() == email.lower()
+      );
+    }
+
+    match /trips/{id} {
+      allow read: if isSignedIn() && (
+        resource.data.get('managerId', '') == authUid() ||
+        resource.data.get('driverUid', '') == authUid() ||
+        (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
+      );
+      
+      allow create: if isSignedIn();
+      
+      allow update: if isSignedIn() && (
+        resource.data.managerId == authUid() ||
+        resource.data.driverUid == authUid()
+      );
+      
+      allow delete: if isManager() && existing().managerId == authUid();
+    }
+
+    match /vehicles/{id} {
+      allow read: if isSignedIn() && (
+        resource.data.get('managerId', '') == authUid() ||
+        (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
+      );
+      allow create: if isManager() && hasAvailableSlots();
+      allow update, delete: if isManager() && existing().managerId == authUid();
+    }
+
+    match /routes/{id} {
+      allow read: if isSignedIn() && (
+        resource.data.get('managerId', '') == authUid() ||
+        (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
+      );
+      allow write: if isManager();
+    }
+
+    match /shifts/{id} {
+      allow read: if isSignedIn() && (
+        resource.data.get('managerId', '') == authUid() ||
+        (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
+      );
+      allow write: if isManager();
+    }
+
+    match /sos_alerts/{id} {
+      allow read: if isSignedIn() && (
+        resource.data.get('managerId', '') == authUid() ||
+        (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
+      );
+      allow write: if isSignedIn();
+    }
+
+    match /notifications/{id} {
+      allow create: if isSignedIn();
+      allow read: if isSignedIn() && (
+        resource.data.get('managerId', '') == authUid() ||
+        resource.data.get('driverUid', '') == authUid() ||
+        (resource.data.get('isForDrivers', false) == true && exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
+      );
+      allow update: if isSignedIn() && (
+        // Managers can update everything
+        (resource.data.managerId == authUid()) ||
+        // Drivers can ONLY update the 'read' field and only if they are the recipient or it's for all drivers
+        (
+          incoming().diff(existing()).affectedKeys().hasOnly(['read']) &&
+          (
+            resource.data.get('driverUid', '') == authUid() ||
+            (resource.data.get('isForDrivers', false) == true && exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
+          )
+        )
+      );
+      allow delete: if isManager() && existing().managerId == authUid();
+    }
+
+    match /customers/{uid}/{document=**} {
+      allow read, write: if isSignedIn() && authUid() == uid;
+    }
+
+    match /users/{uid}/transactions/{id} {
+      allow read: if isSignedIn() && (authUid() == uid || isManager());
+    }
+
+    match /users/{uid}/invoices/{id} {
+      allow read: if isSignedIn() && (authUid() == uid || isManager());
+    }
+
+    match /manager_subscriptions/{uid} {
+      allow read: if isSignedIn() && (authUid() == uid || isManager());
+    }
+  }
+}

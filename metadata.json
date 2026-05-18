@@ -1,0 +1,11 @@
+{
+  "name": "TukTrack | Fleet Management",
+  "description": "Secure SaaS platform for Tuk-Tuk fleet operations. Real-time GPS tracking, earnings reports, and SOS safety systems for professional operators.",
+  "requestFramePermissions": [
+    "geolocation",
+    "notifications"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
