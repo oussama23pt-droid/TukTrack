@@ -38,10 +38,6 @@ export default async function handler(req: any, res: any) {
         metadata: metadata,
       },
       metadata: metadata,
-      customer_update: {
-        address: "auto",
-        name: "auto",
-      },
       success_url: `${origin}/manager/billing?success=true`,
       cancel_url: `${origin}/manager/billing?canceled=true`,
     });
