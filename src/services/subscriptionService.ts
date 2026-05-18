@@ -74,7 +74,7 @@ class SubscriptionService {
 
     try {
       const headers = await this.getAuthHeaders();
-      const response = await fetch('/api/stripe/create-portal', {
+      const response = await fetch('https://tuk-track.vercel.app/api/stripe/create-portal', {
         method: 'POST',
         headers,
         body: JSON.stringify({ managerId })
