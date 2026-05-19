@@ -257,25 +257,33 @@ export default function TripsManagement() {
       doc.text(`Total de Viagens: ${filteredTrips.length}`, 14, (doc as any).lastAutoTable.finalY + 15);
       doc.text(`Faturação Total: ${totalRevenue.toFixed(2)}€`, 14, (doc as any).lastAutoTable.finalY + 22);
 
-      // Support for mobile downloads in WebViews
-      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      const filename = `Relatorio_Viagens_${startDate}_${endDate}.pdf`;
+      const blob = doc.output('blob');
 
-      if (isMobile) {
-        const blob = doc.output('blob');
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        setTimeout(() => {
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-        }, 100);
-      } else {
-        doc.save(filename);
-      }
+// Check if running in Median APK
+if (window.median) {
+  const reader = new FileReader();
+  reader.readAsDataURL(blob);
+  reader.onloadend = () => {
+    median.share.downloadFile({
+      url: reader.result,
+      filename: filename,
+      open: true
+    });
+  };
+} else if (isMobile) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => {
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, 100);
+} else {
+  doc.save(filename);
+}
     } catch (error) {
       console.error('Error generating PDF:', error);
     } finally {
