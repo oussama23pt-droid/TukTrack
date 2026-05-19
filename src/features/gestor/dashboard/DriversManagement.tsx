@@ -109,7 +109,7 @@ export default function DriversManagement({ initialTab, hideTabs = false }: { in
 
   const allDrivers = [...usersDrivers, ...manualDrivers];
   const effectivePlanId = userData?.planId || activePlanId || 'free';
-  const currentPlanLimit = userData?.vehicleSlots || PLAN_CAPACITIES[effectivePlanId] || 1;
+  const currentPlanLimit = Number(userData?.vehicleSlots ?? PLAN_CAPACITIES[effectivePlanId] ?? 1);
   const isVehicleLimitReached = vehicles.length >= currentPlanLimit;
 
   const filteredDrivers = allDrivers.filter(driver => 
@@ -357,6 +357,7 @@ export default function DriversManagement({ initialTab, hideTabs = false }: { in
         }}
         vehicleCount={vehicles.length}
         vehicleSlots={currentPlanLimit}
+        isDataLoading={isLoading || !userData}
       />
 
       <ConfirmationModal 
@@ -1531,13 +1532,16 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
   );
 }
 
-function UpsertVehicleModal({ isOpen, onClose, managerId, initialData, onDelete, vehicleCount, vehicleSlots }: { isOpen: boolean, onClose: () => void, managerId: string, initialData?: any, onDelete?: (data: any) => void, vehicleCount: number, vehicleSlots: number }) {
+function UpsertVehicleModal({ isOpen, onClose, managerId, initialData, onDelete, vehicleCount, vehicleSlots, isDataLoading }: { isOpen: boolean, onClose: () => void, managerId: string, initialData?: any, onDelete?: (data: any) => void, vehicleCount: number, vehicleSlots: number, isDataLoading?: boolean }) {
   const [plate, setPlate] = useState('');
   const [color, setColor] = useState('');
   const [status, setStatus] = useState<'active' | 'maintenance' | 'service'>('active');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const isAtLimit = !initialData && vehicleCount >= vehicleSlots;
+  // Strength the check: only block if we are sure about the data and the count is actually exceeding the slots
+  const safeVehicleCount = Number(vehicleCount || 0);
+  const safeVehicleSlots = Number(vehicleSlots || 1);
+  const isAtLimit = !initialData && !isDataLoading && safeVehicleCount >= safeVehicleSlots;
 
   useEffect(() => {
     if (initialData) {

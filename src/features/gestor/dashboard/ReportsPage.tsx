@@ -308,7 +308,30 @@ export default function ReportsPage() {
         headStyles: { fillColor: [30, 41, 59] },
       });
 
-      doc.save(`Relatorio_Conta_${startDate}_${endDate}.pdf`);
+      // For mobile devices, doc.save() often fails in WebViews.
+      // We use a blob approach which is more widely compatible.
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const filename = `Relatorio_Conta_${startDate}_${endDate}.pdf`;
+
+      if (isMobile) {
+        const blob = doc.output('blob');
+        const url = URL.createObjectURL(blob);
+        
+        // Create a temporary link and trigger it
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        
+        // Clean up
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        }, 100);
+      } else {
+        doc.save(filename);
+      }
     } catch (error) {
       console.error('Error generating PDF:', error);
     } finally {
