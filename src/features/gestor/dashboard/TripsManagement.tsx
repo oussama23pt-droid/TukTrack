@@ -257,7 +257,8 @@ export default function TripsManagement() {
       doc.text(`Total de Viagens: ${filteredTrips.length}`, 14, (doc as any).lastAutoTable.finalY + 15);
       doc.text(`Faturação Total: ${totalRevenue.toFixed(2)}€`, 14, (doc as any).lastAutoTable.finalY + 22);
 
-      const blob = doc.output('blob');
+      const filename = `Relatorio_Viagens_${startDate}_${endDate}.pdf`;
+const blob = doc.output('blob');
 
 // Check if running in Median APK
 if ((window as any).median) {
