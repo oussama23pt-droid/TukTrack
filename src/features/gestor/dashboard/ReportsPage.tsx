@@ -313,25 +313,32 @@ export default function ReportsPage() {
       const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
       const filename = `Relatorio_Conta_${startDate}_${endDate}.pdf`;
 
-      if (isMobile) {
-        const blob = doc.output('blob');
-        const url = URL.createObjectURL(blob);
-        
-        // Create a temporary link and trigger it
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        
-        // Clean up
-        setTimeout(() => {
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-        }, 100);
-      } else {
-        doc.save(filename);
-      }
+      const blob = doc.output('blob');
+
+if ((window as any).median) {
+  const reader = new FileReader();
+  reader.readAsDataURL(blob);
+  reader.onloadend = () => {
+    (window as any).median.share.downloadFile({
+      url: reader.result,
+      filename: filename,
+      open: true
+    });
+  };
+} else if (isMobile) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => {
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, 100);
+} else {
+  doc.save(filename);
+}
     } catch (error) {
       console.error('Error generating PDF:', error);
     } finally {
