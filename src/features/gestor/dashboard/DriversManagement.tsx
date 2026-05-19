@@ -33,9 +33,27 @@ const PLANS = [
 type Tab = 'drivers' | 'vehicles' | 'subscriptions';
 
 export default function DriversManagement({ initialTab, hideTabs = false }: { initialTab?: Tab, hideTabs?: boolean }) {
-  const { userData } = useAuth();
+  const { user, userData, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>(initialTab || 'drivers');
   const [activePlanId, setActivePlanId] = useState<string>(userData?.planId || '');
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="animate-spin text-amber" size={32} />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] text-center p-8 bg-slate-50 rounded-[3rem]">
+        <Lock size={48} className="text-slate-300 mb-4" />
+        <h3 className="text-xl font-bold text-slate-800">Acesso Restrito</h3>
+        <p className="text-slate-500 mt-2">Por favor, faça login para aceder à gestão de frota.</p>
+      </div>
+    );
+  }
 
   useEffect(() => {
     if (userData?.planId) {
@@ -53,7 +71,8 @@ export default function DriversManagement({ initialTab, hideTabs = false }: { in
   const [activeTrips, setActiveTrips] = useState<any[]>([]);
   const [manualDrivers, setManualDrivers] = useState<any[]>([]);
   const [vehicles, setVehicles] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isDriversLoading, setIsDriversLoading] = useState(true);
+  const [isVehiclesLoading, setIsVehiclesLoading] = useState(true);
   const slotsBeforePolling = React.useRef(userData?.vehicleSlots || 1);
   const [isAddDriverOpen, setIsAddDriverOpen] = useState(false);
   const [isAddVehicleOpen, setIsAddVehicleOpen] = useState(false);
@@ -61,33 +80,39 @@ export default function DriversManagement({ initialTab, hideTabs = false }: { in
   const [editingVehicle, setEditingVehicle] = useState<any>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; type: 'driver' | 'vehicle'; id: string; name: string; data?: any } | null>(null);
 
+  const isLoading = isDriversLoading || isVehiclesLoading;
+
   useEffect(() => {
-    if (!userData?.uid) return;
+    if (!user?.uid) return;
 
     // Real-time Drivers
     const usersDriversQuery = query(
       collection(db, 'users'),
-      where('managerId', '==', userData.uid),
+      where('managerId', '==', user.uid),
       where('role', '==', 'driver')
     );
 
     const unsubUsersDrivers = onSnapshot(usersDriversQuery, (snapshot) => {
       setUsersDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), type: 'user' })));
-      setIsLoading(false);
+      setIsDriversLoading(false);
     }, (error) => {
       handleFirestoreError(error, 'list', 'users');
+      setIsDriversLoading(false);
     });
 
     // Real-time Vehicles
     const vehiclesQuery = query(
       collection(db, 'vehicles'),
-      where('managerId', '==', userData.uid)
+      where('managerId', '==', user.uid)
     );
 
     const unsubVehicles = onSnapshot(vehiclesQuery, (snapshot) => {
-      setVehicles(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      console.log("[SYNC] Received vehicles snapshot:", snapshot.size);
+      setVehicles(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(v => !!v.id));
+      setIsVehiclesLoading(false);
     }, (error) => {
       handleFirestoreError(error, 'list', 'vehicles');
+      setIsVehiclesLoading(false);
     });
 
     const activeTripsQuery = query(
@@ -223,11 +248,11 @@ export default function DriversManagement({ initialTab, hideTabs = false }: { in
             )}
             {activeTab === 'vehicles' && (
               <button 
-                onClick={() => !isVehicleLimitReached && setIsAddVehicleOpen(true)}
-                disabled={isVehicleLimitReached}
+                onClick={() => !(isVehicleLimitReached || isLoading) && setIsAddVehicleOpen(true)}
+                disabled={isVehicleLimitReached || isLoading}
                 className={cn(
                   "flex items-center space-x-3 font-black py-2 px-8 rounded-2xl transition-all h-[58px] shadow-lg outline-none group",
-                  isVehicleLimitReached 
+                  (isVehicleLimitReached || isLoading)
                     ? "bg-slate-50 text-slate-300 cursor-not-allowed border-2 border-dashed border-slate-200 shadow-none" 
                     : "bg-gradient-to-r from-amber to-amber-600 text-navy hover:scale-[1.02] active:scale-[0.98] shadow-amber/20"
                 )}
@@ -348,7 +373,7 @@ export default function DriversManagement({ initialTab, hideTabs = false }: { in
           setIsAddVehicleOpen(false);
           setEditingVehicle(null);
         }} 
-        managerId={userData?.uid || ''}
+        managerId={user?.uid || ''}
         initialData={editingVehicle}
         onDelete={(data) => {
           setIsAddVehicleOpen(false);
@@ -1540,8 +1565,20 @@ function UpsertVehicleModal({ isOpen, onClose, managerId, initialData, onDelete,
 
   // Strength the check: only block if we are sure about the data and the count is actually exceeding the slots
   const safeVehicleCount = Number(vehicleCount || 0);
-  const safeVehicleSlots = Number(vehicleSlots || 1);
+  const safeVehicleSlots = Number(vehicleSlots || (initialData ? 100 : 1));
   const isAtLimit = !initialData && !isDataLoading && safeVehicleCount >= safeVehicleSlots;
+
+  useEffect(() => {
+    if (isOpen) {
+      console.log("[MODAL] Opening UpsertVehicleModal:", {
+        initialData: !!initialData,
+        vehicleCount: safeVehicleCount,
+        vehicleSlots: safeVehicleSlots,
+        isAtLimit,
+        isDataLoading
+      });
+    }
+  }, [isOpen, safeVehicleCount, safeVehicleSlots, isAtLimit, isDataLoading]);
 
   useEffect(() => {
     if (initialData) {
@@ -1558,6 +1595,10 @@ function UpsertVehicleModal({ isOpen, onClose, managerId, initialData, onDelete,
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isAtLimit) return;
+    if (!managerId) {
+      console.error("Missing managerId for vehicle creation");
+      return;
+    }
     setIsSubmitting(true);
     try {
       if (initialData) {
@@ -1570,7 +1611,7 @@ function UpsertVehicleModal({ isOpen, onClose, managerId, initialData, onDelete,
         const newVehicleRef = doc(collection(db, 'vehicles'));
         await setDoc(newVehicleRef, sanitizeData({
           id: newVehicleRef.id,
-          managerId,
+          managerId: managerId,
           plateNumber: plate.toUpperCase(),
           color,
           status,
@@ -1579,9 +1620,13 @@ function UpsertVehicleModal({ isOpen, onClose, managerId, initialData, onDelete,
       }
       onClose();
     } catch (err: any) {
+      console.error("Firestore vehicle error:", err);
+      // We still try to allow retry after error
+      setIsSubmitting(false);
       handleFirestoreError(err, initialData ? 'update' : 'create', `vehicles/${initialData?.id || 'new_vehicle'}`);
     } finally {
-      setIsSubmitting(false);
+      // Small delay before allowing next click to ensure state propagates
+      setTimeout(() => setIsSubmitting(false), 500);
     }
   };
 

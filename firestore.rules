@@ -15,24 +15,21 @@ service cloud.firestore {
     function isManager() { 
       return isSignedIn() && 
              exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-             (getAuthUserData().get('role', 'none') == 'manager' || getAuthUserData().get('role', 'none') == 'owner');
+             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'none') == 'manager' || 
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'none') == 'owner');
     }
 
     function getSubscriptionVault() {
-      return get(/databases/$(database)/documents/manager_subscriptions/$(request.auth.uid)).data;
+      return exists(/databases/$(database)/documents/manager_subscriptions/$(request.auth.uid)) 
+             ? get(/databases/$(database)/documents/manager_subscriptions/$(request.auth.uid)).data 
+             : null;
     }
 
     function hasAvailableSlots() {
-      let slots = getAuthUserData().get('vehicleSlots', 1);
-      // Fallback to vault if users doc is out of sync
-      let vaultSlots = exists(/databases/$(database)/documents/manager_subscriptions/$(request.auth.uid)) ? 
-        getSubscriptionVault().get('vehicleSlots', 1) : slots;
-      let finalSlots = vaultSlots > slots ? vaultSlots : slots;
-      
-      // Note: Full collection counting is not supported in standard security rules.
-      // We rely on the frontend validation and server-side checks during subscription management.
-      // To prevent 'Access Denied' errors from blocking the UI, we return true if finalSlots is at least 1.
-      return finalSlots >= 1;
+      return isManager() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('vehicleSlots', 1) >= 1 ||
+        (getSubscriptionVault() != null && getSubscriptionVault().get('vehicleSlots', 1) >= 1)
+      );
     }
     
     function isValidId(id) { return id is string && id.size() <= 128; }
@@ -98,11 +95,16 @@ service cloud.firestore {
 
     match /vehicles/{id} {
       allow read: if isSignedIn() && (
-        resource.data.get('managerId', '') == authUid() ||
-        (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
+        resource.data.get('managerId', '') == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
       );
-      allow create: if isManager() && hasAvailableSlots();
-      allow update, delete: if isManager() && existing().managerId == authUid();
+      
+      // Allow creation if the vehicle is for the current user and they are a manager/owner
+      allow create: if isSignedIn() && isManager() && (request.resource.data.get('managerId', '') == request.auth.uid);
+      
+      allow update, delete: if isSignedIn() && (
+        resource.data.get('managerId', '') == request.auth.uid || isManager()
+      );
     }
 
     match /routes/{id} {

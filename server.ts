@@ -11,11 +11,11 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const _filename = typeof import.meta !== 'undefined' && import.meta.url ? fileURLToPath(import.meta.url) : '';
+const _dirname = _filename ? path.dirname(_filename) : process.cwd();
 
 // Initialize Firebase Admin
-const configPath = path.resolve(__dirname, "./firebase-applet-config.json");
+const configPath = path.resolve(_dirname, "./firebase-applet-config.json");
 let databaseId: string | undefined = undefined;
 
 if (fs.existsSync(configPath)) {
