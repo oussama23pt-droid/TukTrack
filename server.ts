@@ -292,32 +292,38 @@ async function startServer() {
   });
 
   // API: Create Portal Session
-  app.post("/api/stripe/create-portal", authenticate, async (req: any, res) => {
-    const { managerId } = req.body;
-    const userId = req.user.uid;
+app.post("/api/stripe/create-portal", authenticate, async (req: any, res: any) => {
+  const { managerId } = req.body;
+  const userId = req.user.uid;
 
-    try {
-      const userDoc = await db.collection("users").doc(userId).get();
-      const userData = userDoc.data();
+  try {
+    const userDoc = await db.collection("users").doc(userId).get();
+    const userData = userDoc.data();
 
-      if (!userData || userData.uid !== userId) {
-        return res.status(403).json({ error: "Permission denied" });
-      }
-
-      if (!userData.stripeCustomerId) {
-        return res.status(404).json({ error: "Stripe customer not found" });
-      }
-
-      const origin = req.get('origin') || APP_URL;
-      const session = await stripe.billingPortal.sessions.create({
-        customer: userData.stripeCustomerId,
-        return_url: `${origin}/manager/dashboard?tab=subscriptions`,
-      });
-      res.json({ portalUrl: session.url });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+    if (!userData || userData.uid !== userId) {
+      return res.status(403).json({ error: "Permission denied" });
     }
-  });
+
+    if (!userData.stripeCustomerId) {
+      return res.status(400).json({ 
+        error: "Não tem nenhuma assinatura ativa. Por favor, escolha um plano acima primeiro." 
+      });
+    }
+
+    const session = await stripe.billingPortal.sessions.create({
+      customer: userData.stripeCustomerId,
+      return_url: `${process.env.APP_URL || "https://tuk-track.vercel.app"}/manager/billing`,
+    });
+
+    return res.json({ url: session.url });
+
+  } catch (error: any) {
+    console.error("Stripe Portal Error:", error);
+    return res.status(500).json({ 
+      error: "Erro ao abrir o portal de faturação. Tente novamente mais tarde." 
+    });
+  }
+});
 
   // API: Update Stripe Customer Info
   app.post("/api/stripe/update-customer", authenticate, async (req: any, res) => {
