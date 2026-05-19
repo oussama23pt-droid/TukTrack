@@ -260,11 +260,11 @@ export default function TripsManagement() {
       const blob = doc.output('blob');
 
 // Check if running in Median APK
-if (window.median) {
+if ((window as any).median) {
   const reader = new FileReader();
   reader.readAsDataURL(blob);
   reader.onloadend = () => {
-    median.share.downloadFile({
+    (window as any).median.share.downloadFile({
       url: reader.result,
       filename: filename,
       open: true
