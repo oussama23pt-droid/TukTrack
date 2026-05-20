@@ -31,14 +31,16 @@ class SubscriptionService {
       const response = await fetch('/api/stripe/create-checkout', {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          priceId,
-          managerId,
-          userId,
-          billingCycle,
-          plan_id: planId,
-          vehicle_slots
-        })
+ body: JSON.stringify({
+  priceId,
+  customerId: managerId,
+  metadata: {
+    userId,
+    plan: planId,
+    billingCycle,
+    vehicle_slots
+  }
+})
       });
 
       if (!response.ok) {
@@ -55,7 +57,13 @@ class SubscriptionService {
           vehicleSlots: vehicle_slots,
           billingCycle,
           timestamp: Date.now()
-        }));
+        if ((window as any).median) {
+  (window as any).median.openExternalUrl({ 
+    url: checkoutUrl 
+  });
+} else {
+  window.location.href = checkoutUrl;
+}
         window.location.href = checkoutUrl;
       }
       
@@ -79,7 +87,13 @@ class SubscriptionService {
         headers,
         body: JSON.stringify({ managerId })
       });
-
+if ((window as any).median) {
+  (window as any).median.openExternalUrl({ 
+    url: portalUrl 
+  });
+} else {
+  window.location.href = portalUrl;
+}
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || 'Failed to create portal session');
