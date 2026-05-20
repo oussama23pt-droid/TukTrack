@@ -45,10 +45,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   : plan === 'pro' ? 30
   : 1;
 
+// TO:
 await db.collection('users').doc(userId).update({
+  planId: plan,
   plan: plan,
   vehicleSlots: vehicleSlots,
   subscriptionStatus: 'active',
+  stripeSubscriptionId: session.subscription,
   stripeCustomerId: session.customer,
   subscriptionId: session.subscription,
   planActivatedAt: new Date().toISOString(),
@@ -62,8 +65,7 @@ await db.collection('users').doc(userId).update({
       const snapshot = await db.collection('users')
         .where('subscriptionId', '==', sub.id).get();
       snapshot.forEach(doc => {
-        doc.ref.update({ plan: 'free', subscriptionId: null });
-      });
+        doc.ref.update({ plan: 'free', planId: 'free', vehicleSlots: 1, subscriptionStatus: 'cancelled', subscriptionId: null })
       break;
     }
   }
