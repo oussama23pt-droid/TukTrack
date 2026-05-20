@@ -47,15 +47,15 @@ class SubscriptionService {
       const { checkoutUrl } = await response.json();
 
       if (checkoutUrl) {
-        sessionStorage.setItem('pending_subscription', JSON.stringify({
-          planId,
-          vehicleSlots: vehicle_slots,
-          billingCycle,
-          timestamp: Date.now()
-        }));
-localStorage.setItem('payment_just_completed', 'true');
-window.location.href = checkoutUrl;
-      }
+  localStorage.setItem('pending_subscription', JSON.stringify({
+    planId,
+    vehicleSlots: vehicle_slots,
+    billingCycle,
+    timestamp: Date.now()
+  }));
+  localStorage.setItem('payment_just_completed', 'true');
+  window.location.href = checkoutUrl;
+}
 
       return { checkoutUrl };
     } catch (error: any) {
