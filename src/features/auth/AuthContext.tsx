@@ -71,7 +71,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Handle success redirect immediately
 if (window.location.search.includes('success')) {
   localStorage.setItem('payment_just_completed', 'true');
-  const pending = sessionStorage.getItem('pending_subscription');
+  const pending = sessionStorage.getItem('pending_subscription') 
+  || localStorage.getItem('pending_subscription');
   if (pending) {
     console.log("[AUTH] Success redirect detected, applying optimistic subscription");
     localStorage.setItem('pending_subscription_sync', pending);
