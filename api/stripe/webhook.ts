@@ -40,12 +40,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const plan = session.metadata?.plan || 'pro';
 
       if (userId) {
-        await db.collection('users').doc(userId).update({
-          plan: plan,
-          stripeCustomerId: session.customer,
-          subscriptionId: session.subscription,
-          planActivatedAt: new Date().toISOString(),
-        });
+        const vehicleSlots = plan === 'starter' ? 3
+  : plan === 'basic' ? 10
+  : plan === 'pro' ? 30
+  : 1;
+
+await db.collection('users').doc(userId).update({
+  plan: plan,
+  vehicleSlots: vehicleSlots,
+  subscriptionStatus: 'active',
+  stripeCustomerId: session.customer,
+  subscriptionId: session.subscription,
+  planActivatedAt: new Date().toISOString(),
+});
       }
       break;
     }
