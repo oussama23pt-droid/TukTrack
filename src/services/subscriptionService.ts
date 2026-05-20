@@ -80,7 +80,7 @@ class SubscriptionService {
         throw new Error(errorData.error || 'Failed to create portal session');
       }
 
-      const { portalUrl } = await response.json();
+      const { url: portalUrl } = await response.json();
 
       if (portalUrl) {
         window.open(portalUrl, '_blank');
