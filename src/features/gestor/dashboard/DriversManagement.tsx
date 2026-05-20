@@ -556,12 +556,7 @@ function SubscriptionManagement({
     try {
       const priceId = cycleToUse === 'monthly' ? plan.monthlyPriceId : plan.annualPriceId;
       await subscriptionService.startSubscription(
-        priceId,
-        userData.uid,
-        authUser.uid,
-        cycleToUse,
-        plan.id,
-        plan.vehicles
+        priceId, userData.uid, authUser.uid, plan.id, cycleToUse, plan.vehicles
       );
     } catch (err: any) {
       console.error('Subscription error:', err);
