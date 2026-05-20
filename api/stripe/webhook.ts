@@ -39,8 +39,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (userId) {
         const vehicleSlots = plan === 'starter' ? 3
-          : plan === 'basic' ? 10
-          : plan === 'pro' ? 30
+          : plan === 'basic' ? 5
+: plan === 'pro' ? 10
           : 1;
 
         await db.collection('users').doc(userId).update({
