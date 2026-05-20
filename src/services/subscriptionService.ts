@@ -67,7 +67,6 @@ class SubscriptionService {
   }
 }
       
-      
       return { checkoutUrl };
     } catch (error: any) {
       console.error('Error starting subscription:', error);
