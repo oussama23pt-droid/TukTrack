@@ -166,7 +166,8 @@ service cloud.firestore {
     }
 
     match /manager_subscriptions/{uid} {
-      allow read: if isSignedIn() && (authUid() == uid || isManager());
-    }
+  allow read: if isSignedIn() && (authUid() == uid || isManager());
+  allow write: if isSignedIn() && authUid() == uid;
+}
   }
 }
