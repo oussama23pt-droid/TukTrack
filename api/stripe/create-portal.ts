@@ -1,7 +1,16 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+
+if (!getApps().length) {
+  initializeApp({
+    credential: cert(JSON.parse(process.env.FIREBASE_ADMIN_KEY!))
+  });
+}
+const db = getFirestore();
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -11,8 +20,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { stripeCustomerId } = req.body;
 
+    // Look up real Stripe customer ID from Firestore
+    const userDoc = await db.collection('users').doc(stripeCustomerId).get();
+    const realStripeCustomerId = userDoc.data()?.stripeCustomerId;
+
+    if (!realStripeCustomerId) {
+      throw new Error('No Stripe customer found for this user');
+    }
+
     const session = await stripe.billingPortal.sessions.create({
-      customer: stripeCustomerId,
+      customer: realStripeCustomerId,
       return_url: `${process.env.APP_URL}/manager/billing`,
     });
 
