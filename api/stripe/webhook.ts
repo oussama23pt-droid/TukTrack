@@ -40,23 +40,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const plan = session.metadata?.plan || 'pro';
 
       if (userId) {
-        const vehicleSlots = plan === 'starter' ? 3
-  : plan === 'basic' ? 10
-  : plan === 'pro' ? 30
-  : 1;
+  const vehicleSlots = plan === 'starter' ? 3
+    : plan === 'basic' ? 10
+    : plan === 'pro' ? 30
+    : 1;
 
-// TO:
-await db.collection('users').doc(userId).update({
-  planId: plan,
-  plan: plan,
-  vehicleSlots: vehicleSlots,
-  subscriptionStatus: 'active',
-  stripeSubscriptionId: session.subscription,
-  stripeCustomerId: session.customer,
-  subscriptionId: session.subscription,
-  planActivatedAt: new Date().toISOString(),
-});
-      }
+  await db.collection('users').doc(userId).update({
+    planId: plan,
+    plan: plan,
+    vehicleSlots: vehicleSlots,
+    subscriptionStatus: 'active',
+    stripeSubscriptionId: session.subscription,
+    stripeCustomerId: session.customer,
+    subscriptionId: session.subscription,
+    planActivatedAt: new Date().toISOString(),
+  });
+}
+break;
+}
       break;
     }
 
@@ -65,10 +66,10 @@ await db.collection('users').doc(userId).update({
       const snapshot = await db.collection('users')
         .where('subscriptionId', '==', sub.id).get();
       snapshot.forEach(doc => {
-        doc.ref.update({ plan: 'free', planId: 'free', vehicleSlots: 1, subscriptionStatus: 'cancelled', subscriptionId: null })
-      break;
-    }
-  }
+  doc.ref.update({ plan: 'free', planId: 'free', vehicleSlots: 1, subscriptionStatus: 'cancelled', subscriptionId: null });
+});
+break;
+}
 
   return res.json({ received: true });
 }
