@@ -88,13 +88,9 @@ class SubscriptionService {
 
     const { portalUrl } = await response.json();
     if (portalUrl) {
-      if ((window as any).median) {
-        (window as any).median.openExternalUrl({
-          url: portalUrl
-        });
-      window.open(portalUrl, '_blank');
-    throw error;
-  }
+      if (portalUrl) {
+  window.open(portalUrl, '_blank');
+}
   }
 
   /**
