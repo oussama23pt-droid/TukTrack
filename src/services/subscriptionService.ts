@@ -51,20 +51,21 @@ class SubscriptionService {
       const { checkoutUrl } = await response.json();
       
       if (checkoutUrl) {
-        // Save pending subscription detail for optimistic UI updates on success redirect
-        sessionStorage.setItem('pending_subscription', JSON.stringify({
-          planId,
-          vehicleSlots: vehicle_slots,
-          billingCycle,
-          timestamp: Date.now()
-        if ((window as any).median) {
-  (window as any).median.openExternalUrl({ 
-    url: checkoutUrl 
-  });
-} else {
-  window.location.href = checkoutUrl;
+  sessionStorage.setItem('pending_subscription', JSON.stringify({
+    planId,
+    vehicleSlots: vehicle_slots,
+    billingCycle,
+    timestamp: Date.now()
+  }));
+
+  if ((window as any).median) {
+    (window as any).median.openExternalUrl({
+      url: checkoutUrl
+    });
+  } else {
+    window.location.href = checkoutUrl;
+  }
 }
-        window.location.href = checkoutUrl;
       }
       
       return { checkoutUrl };
