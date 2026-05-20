@@ -28,7 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       line_items: [{ price: priceId, quantity: 1 }],
       subscription_data: { metadata },
       metadata,
-      success_url: `${origin}/manager/billing?success=true`,
+      success_url: `${origin}/subscription-success?managerId=${metadata.userId}`,
       cancel_url: `${origin}/manager/billing?canceled=true`,
     });
 
