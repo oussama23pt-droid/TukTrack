@@ -52,8 +52,7 @@ class SubscriptionService {
           vehicleSlots: vehicle_slots,
           billingCycle,
           timestamp: Date.now()
-        }));
-        window.open(checkoutUrl, '_blank');
+        }));window.location.href = checkoutUrl;
       }
 
       return { checkoutUrl };
