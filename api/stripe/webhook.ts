@@ -38,10 +38,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const plan = session.metadata?.plan || 'pro';
 
       if (userId) {
-        const vehicleSlots = plan === 'starter' ? 3
-          : plan === 'basic' ? 5
-: plan === 'pro' ? 10
-          : 1;
+        const metaSlots = parseInt(session.metadata?.vehicle_slots || '0');
+const vehicleSlots = metaSlots > 0 ? metaSlots
+  : plan === 'starter' ? 3
+  : plan === 'basic' ? 5
+  : plan === 'pro' ? 10
+  : plan === 'fleet' ? 15
+  : plan === 'enterprise' ? 25
+  : 1;
 
         await db.collection('users').doc(userId).update({
           planId: plan,
