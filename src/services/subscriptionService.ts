@@ -1,6 +1,5 @@
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { db, auth } from '../../../lib/firebase';
-
+import { db, auth } from '../../lib/firebase';
 export type SubscriptionStatus = 'active' | 'trial' | 'cancelled' | 'none';
 
 export interface ManagerSubscription {
