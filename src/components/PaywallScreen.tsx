@@ -141,12 +141,7 @@ export const PaywallScreen: React.FC<{ managerId: string }> = ({ managerId }) =>
     try {
       const priceId = billingCycle === 'monthly' ? plan.monthlyPriceId : plan.annualPriceId;
       await subscriptionService.startSubscription(
-        priceId,
-        managerId,
-        user.uid,
-        billingCycle,
-        plan.id,
-        plan.slots
+        priceId, managerId, user.uid, plan.id, billingCycle, plan.slots
       );
     } catch (error) {
       console.error('Subscription failed:', error);
