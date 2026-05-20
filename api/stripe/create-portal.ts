@@ -19,10 +19,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const { stripeCustomerId } = req.body;
+    
+    console.log('Body received:', req.body);
+    console.log('Looking up user:', stripeCustomerId);
 
-    // Look up real Stripe customer ID from Firestore
     const userDoc = await db.collection('users').doc(stripeCustomerId).get();
+    
+    console.log('Doc exists:', userDoc.exists);
+    console.log('Doc data:', JSON.stringify(userDoc.data()));
+
     const realStripeCustomerId = userDoc.data()?.stripeCustomerId;
+    
+    console.log('Stripe customer ID found:', realStripeCustomerId);
 
     if (!realStripeCustomerId) {
       throw new Error('No Stripe customer found for this user');
