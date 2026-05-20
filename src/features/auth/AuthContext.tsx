@@ -69,13 +69,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoading(true);
 
         // Handle success redirect immediately
-        if (window.location.search.includes('success')) {
-          const pending = sessionStorage.getItem('pending_subscription');
-          if (pending) {
-            console.log("[AUTH] Success redirect detected, applying optimistic subscription");
-            localStorage.setItem('pending_subscription_sync', pending);
-          }
-        }
+if (window.location.search.includes('success')) {
+  localStorage.setItem('payment_just_completed', 'true');
+  const pending = sessionStorage.getItem('pending_subscription');
+  if (pending) {
+    console.log("[AUTH] Success redirect detected, applying optimistic subscription");
+    localStorage.setItem('pending_subscription_sync', pending);
+  }
+}
+
+// APK fallback - check if payment was just completed
+const justPaid = localStorage.getItem('payment_just_completed');
+if (justPaid) {
+  localStorage.removeItem('payment_just_completed');
+  const pending = sessionStorage.getItem('pending_subscription') 
+    || localStorage.getItem('pending_subscription_sync');
+  if (pending) {
+    localStorage.setItem('pending_subscription_sync', pending);
+  }
+}
         
         let userDocData: UserModel | null = null;
         let subDocData: any = null;
