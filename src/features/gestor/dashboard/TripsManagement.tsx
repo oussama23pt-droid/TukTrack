@@ -282,16 +282,15 @@ if ((window as any).median) {
     document.body.removeChild(mobileLink);
     URL.revokeObjectURL(mobileUrl);
   }, 100);
-}
 } else {
   doc.save(filename);
 }
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-    } finally {
-      setIsExporting(false);
-    }
-  };
+} catch (error) {
+  console.error('Error generating PDF:', error);
+} finally {
+  setIsExporting(false);
+}
+};
 
   return (
     <div className="space-y-12">
