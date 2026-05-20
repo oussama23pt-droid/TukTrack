@@ -211,6 +211,11 @@ async function updateManagerSubscription(
 
     await managerRef.set(updateData, { merge: true });
     console.log(`Updated manager ${managerId} subscription status to ${updateData.subscriptionStatus}`);
+
+    // Also write to subscription vault so AuthContext remembers after logout
+    const vaultRef = db.collection("manager_subscriptions").doc(managerId);
+    await vaultRef.set(updateData, { merge: true });
+    console.log(`Updated vault for manager ${managerId}`);
   } catch (error: any) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
