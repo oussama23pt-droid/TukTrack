@@ -58,11 +58,7 @@ class SubscriptionService {
     timestamp: Date.now()
   }));
 
-  if ((window as any).median) {
-    (window as any).median.openExternalUrl({
-      url: checkoutUrl
-    });
-  } else {
+  window.open(checkoutUrl, '_blank');
     window.location.href = checkoutUrl;
   }
 }
@@ -99,13 +95,7 @@ class SubscriptionService {
         (window as any).median.openExternalUrl({
           url: portalUrl
         });
-      } else {
-        window.location.href = portalUrl;
-      }
-    }
-    return { portalUrl };
-  } catch (error: any) {
-    console.error('Error opening billing portal:', error);
+      window.open(portalUrl, '_blank');
     throw error;
   }
   }
