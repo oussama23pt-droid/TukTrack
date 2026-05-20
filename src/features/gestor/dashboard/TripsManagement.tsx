@@ -259,6 +259,7 @@ export default function TripsManagement() {
 
       const filename = `Relatorio_Viagens_${startDate}_${endDate}.pdf`;
 const blob = doc.output('blob');
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 // Check if running in Median APK
 if ((window as any).median) {
