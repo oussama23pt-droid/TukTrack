@@ -78,36 +78,36 @@ class SubscriptionService {
    * Opens the Stripe Customer Portal using the backend API
    */
   async openBillingPortal(managerId: string) {
-    if (!managerId) throw new Error("Manager ID is required for billing portal");
+  if (!managerId) throw new Error("Manager ID is required for billing");
 
-    try {
-      const headers = await this.getAuthHeaders();
-      const response = await fetch('/api/stripe/create-portal', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ managerId })
-      });
-if ((window as any).median) {
-  (window as any).median.openExternalUrl({ 
-    url: portalUrl 
-  });
-} else {
-  window.location.href = portalUrl;
-}
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create portal session');
-      }
+  try {
+    const headers = await this.getAuthHeaders();
+    const response = await fetch('/api/stripe/create-portal', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ managerId })
+    });
 
-      const { portalUrl } = await response.json();
-      if (portalUrl) {
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to create portal session');
+    }
+
+    const { portalUrl } = await response.json();
+    if (portalUrl) {
+      if ((window as any).median) {
+        (window as any).median.openExternalUrl({
+          url: portalUrl
+        });
+      } else {
         window.location.href = portalUrl;
       }
-      return { portalUrl };
-    } catch (error: any) {
-      console.error('Error opening billing portal:', error);
-      throw error;
     }
+    return { portalUrl };
+  } catch (error: any) {
+    console.error('Error opening billing portal:', error);
+    throw error;
+  }
   }
 
   /**
