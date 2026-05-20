@@ -52,7 +52,9 @@ class SubscriptionService {
           vehicleSlots: vehicle_slots,
           billingCycle,
           timestamp: Date.now()
-        }));window.location.href = checkoutUrl;
+        }));
+localStorage.setItem('payment_just_completed', 'true');
+window.location.href = checkoutUrl;
       }
 
       return { checkoutUrl };
