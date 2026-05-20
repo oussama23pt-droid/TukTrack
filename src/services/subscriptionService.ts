@@ -66,7 +66,7 @@ class SubscriptionService {
     window.location.href = checkoutUrl;
   }
 }
-      }
+      
       
       return { checkoutUrl };
     } catch (error: any) {
