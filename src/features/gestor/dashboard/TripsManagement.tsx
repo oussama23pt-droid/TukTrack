@@ -272,16 +272,17 @@ if ((window as any).median) {
     });
   };
 } else if (isMobile) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
+  const mobileUrl = URL.createObjectURL(blob);
+  const mobileLink = document.createElement('a');
+  mobileLink.href = mobileUrl;
+  mobileLink.download = filename;
+  document.body.appendChild(mobileLink);
+  mobileLink.click();
   setTimeout(() => {
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    document.body.removeChild(mobileLink);
+    URL.revokeObjectURL(mobileUrl);
   }, 100);
+}
 } else {
   doc.save(filename);
 }
