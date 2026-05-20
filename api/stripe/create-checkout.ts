@@ -12,10 +12,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { priceId, customerId, metadata } = req.body;
     const origin = req.headers.origin || process.env.APP_URL;
 
+    // If customerId looks like a Firebase UID (not a Stripe customer), create one
+    let stripeCustomerId = customerId;
+    if (!customerId || !customerId.startsWith('cus_')) {
+      const customer = await stripe.customers.create({
+        metadata: { firebaseUid: customerId }
+      });
+      stripeCustomerId = customer.id;
+    }
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'subscription',
-      customer: customerId,
+      customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
       subscription_data: { metadata },
       metadata,
@@ -23,7 +32,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cancel_url: `${origin}/manager/billing?canceled=true`,
     });
 
-    return res.json({ checkoutUrl: session.url });
+    return res.json({ 
+      checkoutUrl: session.url,
+      stripeCustomerId 
+    });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
