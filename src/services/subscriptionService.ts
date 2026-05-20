@@ -71,7 +71,7 @@ class SubscriptionService {
       const response = await fetch('/api/stripe/create-portal', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ managerId })
+        body: JSON.stringify({ stripeCustomerId: managerId })
       });
 
       if (!response.ok) {
