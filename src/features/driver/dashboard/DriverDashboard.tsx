@@ -543,45 +543,44 @@ export default function DriverDashboard() {
     }
     
     const watchId = navigator.geolocation.watchPosition(
-      async (pos) => {
-        if (!user) return;
-        
-        // Throttle updates to every 10 seconds to save quota/battery
-        const now = Date.now();
-        if (now - lastUpdateRef.current < 10000) {
-           // Still update local coords for map fluidity
-           setCurrentCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-           return;
-        }
-        lastUpdateRef.current = now;
-
-        try {
-          await updateDoc(doc(db, 'users', user.uid), {
-            location: {
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              updatedAt: new Date().toISOString()
-            },
-            currentLat: pos.coords.latitude,
-            currentLng: pos.coords.longitude,
-            locationAccuracy: pos.coords.accuracy,
-            lastUpdated: serverTimestamp()
-          });
-          setCurrentCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-          setLocationStatus('active');
-        } catch (err) {
-          console.error('Watch error during update:', err);
-        }
-      },
-      (err) => {
-        console.error('Watch error:', err);
-        setLocationStatus('disabled');
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 5000
-      }
+  async (pos) => {
+    if (!user) return;
+    const now = Date.now();
+    if (now - lastUpdateRef.current < 10000) {
+       setCurrentCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+       return;
+    }
+    lastUpdateRef.current = now;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        location: {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          updatedAt: new Date().toISOString()
+        },
+        currentLat: pos.coords.latitude,
+        currentLng: pos.coords.longitude,
+        locationAccuracy: pos.coords.accuracy,
+        lastUpdated: serverTimestamp()
+      });
+      setCurrentCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      setLocationStatus('active');
+    } catch (err) {
+      console.error('Watch error during update:', err);
+    }
+  },
+  (err) => {
+    console.error('Watch error:', err);
+    setLocationStatus('disabled');
+    // Auto-restart on error after 5 seconds
+    setTimeout(() => startLocationTracking(), 5000);
+  },
+  {
+    enableHighAccuracy: true,
+    timeout: 30000,
+    maximumAge: 0
+  }
+);
     );
     locationWatchRef.current = watchId;
     setLocationWatchId(watchId);
