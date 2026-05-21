@@ -448,7 +448,6 @@ export default function FleetMap({
               </button>
             </div>
           </motion.div>
-        )}
       </AnimatePresence>
       
       {!MAPBOX_TOKEN && (
