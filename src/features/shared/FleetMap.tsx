@@ -417,7 +417,7 @@ export default function FleetMap({
 
       {/* Info Overlay */}
       <AnimatePresence>
-        {selectedDriver && selectedDriverTrip && (
+        
           <motion.div
             initial={{ opacity: 0, y: 20, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
