@@ -569,18 +569,17 @@ export default function DriverDashboard() {
       console.error('Watch error during update:', err);
     }
   },
-  (err) => {
-    console.error('Watch error:', err);
-    setLocationStatus('disabled');
-    // Auto-restart on error after 5 seconds
-    setTimeout(() => startLocationTracking(), 5000);
-  },
-  {
-    enableHighAccuracy: true,
-    timeout: 30000,
-    maximumAge: 0
-  }
-);
+  
+    (err) => {
+  console.error('Watch error:', err);
+  setLocationStatus('disabled');
+  setTimeout(() => startLocationTracking(), 5000);
+},
+{
+  enableHighAccuracy: true,
+  timeout: 30000,
+  maximumAge: 0
+}
     );
     locationWatchRef.current = watchId;
     setLocationWatchId(watchId);
