@@ -543,8 +543,8 @@ export default function DriverDashboard() {
     androidPriority: 'highAccuracy',
     androidInterval: 10000,
     androidFastestInterval: 5000,
-    androidNotificationTitle: 'TukTrack',
-    androidNotificationText: 'Localização ativa'
+    androidNotificationTitle: '🟢 TukTrack — Online',
+    androidNotificationText: 'A partilhar localização em tempo real. Toque para abrir a aplicação.'
   };
   (window as any).median.backgroundLocation.start(locationRequest);
 };
