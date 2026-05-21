@@ -536,6 +536,24 @@ export default function DriverDashboard() {
 
     return () => unsub();
   }, [user]);
+  const startBackgroundLocation = () => {
+  if (!(window as any).median) return;
+  const locationRequest = {
+    callback: 'medianLocationUpdated',
+    androidPriority: 'highAccuracy',
+    androidInterval: 10000,
+    androidFastestInterval: 5000,
+    androidNotificationTitle: 'TukTrack',
+    androidNotificationText: 'Localização ativa'
+  };
+  (window as any).median.backgroundLocation.start(locationRequest);
+};
+
+const stopBackgroundLocation = () => {
+  if ((window as any).median) {
+    (window as any).median.backgroundLocation.stop();
+  }
+};
 
   const startLocationTracking = () => {
     if (locationWatchRef.current !== null) {
@@ -634,7 +652,7 @@ export default function DriverDashboard() {
               },
               lastUpdated: serverTimestamp()
             });
-            startLocationTracking();
+            startLocationTracking();startBackgroundLocation();
             setIsOnline(true);
             setLocationStatus('active');
           } catch (err) {
@@ -694,7 +712,8 @@ export default function DriverDashboard() {
 
     setIsActionLoading(true);
     try {
-      stopLocationTracking();
+    stopLocationTracking();
+    stopBackgroundLocation();
       await updateDoc(doc(db, 'users', user.uid), {
         isOnline: false,
         status: 'offline',
