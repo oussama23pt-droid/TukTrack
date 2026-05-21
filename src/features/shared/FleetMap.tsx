@@ -430,7 +430,7 @@ export default function FleetMap({
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-black text-amber uppercase tracking-[0.2em] mb-1">Viagem em Curso</p>
-                <h4 className="text-lg font-black text-navy truncate tracking-tight">{selectedDriver.name}</h4>
+                <h4 className="text-lg font-black text-navy truncate tracking-tight">{selectedDriver?.name}</h4>
                 <div className="flex items-center space-x-3 mt-2">
                   <div className="px-2 py-0.5 rounded-md bg-slate-50 border border-slate-100 text-[9px] font-bold text-slate-500 uppercase">
                     {activeRoute?.name || 'Rota Ativa'}
