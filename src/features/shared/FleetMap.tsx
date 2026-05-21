@@ -163,7 +163,7 @@ export default function FleetMap({
 
     const unsubDrivers = onSnapshot(driversQuery, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      setDrivers(docs.filter((d: any) => d.location));
+      setDrivers(docs.filter((d: any) => d.location?.lat && d.location?.lng));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'users');
     });
