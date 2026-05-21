@@ -159,7 +159,7 @@ export default function FleetMap({
       collection(db, 'users'),
       where('managerId', '==', managerId),
       where('role', '==', 'driver'),
-      where('isOnline', '==', true)
+      where('role', '==', 'driver')
     );
 
     const unsubDrivers = onSnapshot(driversQuery, (snapshot) => {
