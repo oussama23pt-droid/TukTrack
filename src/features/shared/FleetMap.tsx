@@ -417,7 +417,7 @@ export default function FleetMap({
 
       {/* Info Overlay */}
       <AnimatePresence>
-        
+        {selectedDriver && (
           <motion.div
             initial={{ opacity: 0, y: 20, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
@@ -436,7 +436,7 @@ export default function FleetMap({
                     {activeRoute?.name || 'Rota Ativa'}
                   </div>
                   <div className="text-[10px] font-bold text-slate-400">
-                    ID: {selectedDriverTrip.id.slice(0, 8)}
+                    ID: {selectedDriverTrip?.id?.slice(0, 8)}
                   </div>
                 </div>
               </div>
@@ -447,7 +447,8 @@ export default function FleetMap({
                 <Activity size={20} className="rotate-45" />
               </button>
             </div>
-          </motion.div>
+                </motion.div>
+    )}
       </AnimatePresence>
       
       {!MAPBOX_TOKEN && (
