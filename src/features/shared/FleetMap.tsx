@@ -158,9 +158,8 @@ export default function FleetMap({
     const driversQuery = query(
       collection(db, 'users'),
       where('managerId', '==', managerId),
-      where('role', '==', 'driver'),
       where('role', '==', 'driver')
-    );
+);
 
     const unsubDrivers = onSnapshot(driversQuery, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
