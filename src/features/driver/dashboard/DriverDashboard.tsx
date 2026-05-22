@@ -57,6 +57,8 @@ export default function DriverDashboard() {
   const [showBackgroundPermissionModal, setShowBackgroundPermissionModal] = useState(false);
   const [showOverlayPermissionModal, setShowOverlayPermissionModal] = useState(false);
   const overlayPermissionGranted = React.useRef<boolean>(false);
+  const [showShiftStartModal, setShowShiftStartModal] = useState(false);
+  const prevActiveShiftRef = React.useRef<any>(null);
 
   // Fetch manager info
   useEffect(() => {
@@ -420,8 +422,14 @@ export default function DriverDashboard() {
     const unsub = onSnapshot(shiftQuery, (snapshot) => {
       if (!snapshot.empty) {
         const shiftData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+        // Only show the modal when shift STARTS (transitions from no shift to active shift)
+        if (!prevActiveShiftRef.current) {
+          setShowShiftStartModal(true);
+        }
+        prevActiveShiftRef.current = shiftData;
         setActiveShift(shiftData);
       } else {
+        prevActiveShiftRef.current = null;
         setActiveShift(null);
       }
     }, (err) => {
@@ -1672,6 +1680,51 @@ export default function DriverDashboard() {
                   className="w-full h-12 text-slate-400 font-bold text-sm"
                 >
                   Continuar sem segundo plano
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Shift Start Modal — prompts driver to go online */}
+      <AnimatePresence>
+        {showShiftStartModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-6"
+          >
+            <motion.div
+              initial={{ scale: 0.85, opacity: 0, y: 40 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.85, opacity: 0, y: 40 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl"
+            >
+              <div className="flex flex-col items-center text-center space-y-4">
+                <div className="w-20 h-20 rounded-full bg-amber/10 flex items-center justify-center">
+                  <span className="text-4xl">🟢</span>
+                </div>
+                <h2 className="text-2xl font-black text-navy">Turno Iniciado!</h2>
+                <p className="text-sm text-slate-500 font-medium leading-relaxed">
+                  O gestor iniciou o turno de operações. Prima <strong className="text-navy">Entrar em Serviço</strong> quando estiver pronto para começar.
+                </p>
+                <button
+                  onClick={() => {
+                    setShowShiftStartModal(false);
+                    if (!isOnline) handleGoOnline();
+                  }}
+                  className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm mt-2"
+                >
+                  Entrar em Serviço
+                </button>
+                <button
+                  onClick={() => setShowShiftStartModal(false)}
+                  className="w-full h-11 text-slate-400 font-bold text-sm"
+                >
+                  Mais Tarde
                 </button>
               </div>
             </motion.div>
