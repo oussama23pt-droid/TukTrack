@@ -385,11 +385,11 @@ export default function DriverDashboard() {
     if (!userData?.managerId) return;
 
     const shiftQuery = query(
-      collection(db, 'shifts'),
-      where('managerId', '==', userData.managerId),
-      where('status', '==', 'active'),
-      limit(1)
-    );
+  collection(db, 'shifts'),
+  where('driverUid', '==', user?.uid),
+  where('status', '==', 'active'),
+  limit(1)
+);
 
     const unsub = onSnapshot(shiftQuery, (snapshot) => {
       if (!snapshot.empty) {
@@ -686,7 +686,7 @@ const stopBackgroundLocation = () => {
     }
     
     // Restricted: Cannot go offline during a shift
-    if (isOnline && activeShift) {
+    if (isOnline && activeShift && activeShift.driverUid === user.uid) {
       // Send notification to manager
       addDoc(collection(db, 'notifications'), {
         managerId: userData.managerId,
@@ -731,13 +731,18 @@ const stopBackgroundLocation = () => {
 
   // Replace old tracking useEffect
   useEffect(() => {
-    if (isOnline) {
-      startLocationTracking();
-    } else {
-      stopLocationTracking();
-    }
-    return () => stopLocationTracking();
-  }, [isOnline, user?.uid]);
+  if (isOnline && user?.uid) {
+    stopLocationTracking();
+    setTimeout(() => startLocationTracking(), 500);
+  } else {
+    stopLocationTracking();
+    stopBackgroundLocation();
+  }
+  return () => {
+    stopLocationTracking();
+    stopBackgroundLocation();
+  };
+}, [isOnline, user?.uid]);
 
   useEffect(() => {
     if (!user) return;
