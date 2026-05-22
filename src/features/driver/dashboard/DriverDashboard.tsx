@@ -725,6 +725,7 @@ export default function DriverDashboard() {
 
   const toggleShift = async () => {
     if (!user || !userData) return;
+    if (isActionLoading) return; // prevent double-tap race condition
     
     if (!isOnline) {
       return handleGoOnline();
@@ -1061,11 +1062,13 @@ export default function DriverDashboard() {
 
       {/* Shift Toggle - 3D Glassy */}
       <motion.button
-        whileTap={{ scale: activeTrip ? 1 : 0.95 }}
-        whileHover={{ scale: activeTrip ? 1 : 1.02 }}
+        whileTap={{ scale: (activeTrip || isActionLoading) ? 1 : 0.95 }}
+        whileHover={{ scale: (activeTrip || isActionLoading) ? 1 : 1.02 }}
         onClick={toggleShift}
+        disabled={isActionLoading}
         className={cn(
           "w-full h-28 rounded-[2rem] flex items-center justify-between px-8 shadow-2xl transition-all duration-500 relative overflow-hidden group",
+          isActionLoading && "opacity-60 cursor-not-allowed",
           activeShift
             ? "glass-card-light border-amber/40 text-amber bg-amber/5 cursor-not-allowed"
             : isOnline 
