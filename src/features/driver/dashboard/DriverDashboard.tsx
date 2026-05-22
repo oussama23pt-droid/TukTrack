@@ -240,6 +240,42 @@ export default function DriverDashboard() {
     };
   }, [isOnline]);
 
+  // Median background location callback — receives GPS updates even when app is minimized
+  useEffect(() => {
+    if (!user) return;
+
+    (window as any).medianLocationUpdated = async (location: any) => {
+      if (!location?.latitude || !location?.longitude) return;
+      const now = Date.now();
+      if (now - lastUpdateRef.current < 8000) {
+        setCurrentCoords({ lat: location.latitude, lng: location.longitude });
+        return;
+      }
+      lastUpdateRef.current = now;
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          location: {
+            lat: location.latitude,
+            lng: location.longitude,
+            updatedAt: new Date().toISOString()
+          },
+          currentLat: location.latitude,
+          currentLng: location.longitude,
+          locationAccuracy: location.accuracy ?? null,
+          lastUpdated: serverTimestamp()
+        });
+        setCurrentCoords({ lat: location.latitude, lng: location.longitude });
+        setLocationStatus('active');
+      } catch (err) {
+        console.error('[Median] location save error:', err);
+      }
+    };
+
+    return () => {
+      delete (window as any).medianLocationUpdated;
+    };
+  }, [user]);
+
   // Monitor GPS status and notify manager if disabled while online
   useEffect(() => {
     if (!user || !userData?.managerId || !isOnline) {
@@ -523,67 +559,71 @@ export default function DriverDashboard() {
   }, [user]);
 
   const startBackgroundLocation = () => {
-    if (!(window as any).median) return;
-    const locationRequest = {
+    if (!(window as any).median?.backgroundLocation) return;
+    (window as any).median.backgroundLocation.start({
       callback: 'medianLocationUpdated',
       androidPriority: 'highAccuracy',
       androidInterval: 10000,
       androidFastestInterval: 5000,
+      iosDesiredAccuracy: 'best',
+      iosDistanceFilter: 10,
       androidNotificationTitle: '🟢 TukTrack — Online',
-      androidNotificationText: 'A partilhar localização em tempo real. Toque para abrir a aplicação.'
-    };
-    (window as any).median.backgroundLocation.start(locationRequest);
+      androidNotificationText: 'A partilhar localização em tempo real. Toque para abrir a aplicação.',
+      androidNotificationIcon: 'ic_notification',
+    });
   };
 
   const stopBackgroundLocation = () => {
-    if ((window as any).median) {
+    if ((window as any).median?.backgroundLocation) {
       (window as any).median.backgroundLocation.stop();
     }
   };
 
   const startLocationTracking = () => {
+    // On Median mobile app — use background location instead of watchPosition
+    // so tracking continues even when driver switches to another app
+    if ((window as any).median?.backgroundLocation) {
+      startBackgroundLocation();
+      return;
+    }
+
+    // Web/browser fallback only
     if (locationWatchRef.current !== null) {
       navigator.geolocation.clearWatch(locationWatchRef.current);
     }
-    
     const watchId = navigator.geolocation.watchPosition(
-  async (pos) => {
-    if (!user) return;
-    const now = Date.now();
-    if (now - lastUpdateRef.current < 10000) {
-       setCurrentCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-       return;
-    }
-    lastUpdateRef.current = now;
-    try {
-      await updateDoc(doc(db, 'users', user.uid), {
-        location: {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          updatedAt: new Date().toISOString()
-        },
-        currentLat: pos.coords.latitude,
-        currentLng: pos.coords.longitude,
-        locationAccuracy: pos.coords.accuracy,
-        lastUpdated: serverTimestamp()
-      });
-      setCurrentCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-      setLocationStatus('active');
-    } catch (err) {
-      console.error('Watch error during update:', err);
-    }
-  },
-  
-    (err) => {
-  console.error('Watch error:', err);
-  setLocationStatus('disabled');
-  setTimeout(() => startLocationTracking(), 5000);
-},
-{
-  enableHighAccuracy: true,
-  timeout: 30000,
-  maximumAge: 0
-}
+      async (pos) => {
+        if (!user) return;
+        const now = Date.now();
+        if (now - lastUpdateRef.current < 10000) {
+          setCurrentCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          return;
+        }
+        lastUpdateRef.current = now;
+        try {
+          await updateDoc(doc(db, 'users', user.uid), {
+            location: {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              updatedAt: new Date().toISOString()
+            },
+            currentLat: pos.coords.latitude,
+            currentLng: pos.coords.longitude,
+            locationAccuracy: pos.coords.accuracy,
+            lastUpdated: serverTimestamp()
+          });
+          setCurrentCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          setLocationStatus('active');
+        } catch (err) {
+          console.error('watchPosition update error:', err);
+        }
+      },
+      (err) => {
+        console.error('watchPosition error:', err);
+        setLocationStatus('disabled');
+        setTimeout(() => startLocationTracking(), 5000);
+      },
+      { enableHighAccuracy: true, timeout: 30000, maximumAge: 0 }
     );
     locationWatchRef.current = watchId;
     setLocationWatchId(watchId);
@@ -638,8 +678,7 @@ export default function DriverDashboard() {
               },
               lastUpdated: serverTimestamp()
             });
-            startLocationTracking();
-            startBackgroundLocation();
+            startLocationTracking(); // handles Median background OR browser watchPosition
             setIsOnline(true);
             setLocationStatus('active');
           } catch (err) {
