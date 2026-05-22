@@ -638,7 +638,8 @@ export default function DriverDashboard() {
               },
               lastUpdated: serverTimestamp()
             });
-            startLocationTracking();startBackgroundLocation();
+            startLocationTracking();
+            startBackgroundLocation();
             setIsOnline(true);
             setLocationStatus('active');
           } catch (err) {
@@ -698,8 +699,9 @@ export default function DriverDashboard() {
 
     setIsActionLoading(true);
     try {
-    stopLocationTracking();
-    stopBackgroundLocation();
+    try {
+      stopLocationTracking();
+      stopBackgroundLocation();
       await updateDoc(doc(db, 'users', user.uid), {
         isOnline: false,
         status: 'offline',
