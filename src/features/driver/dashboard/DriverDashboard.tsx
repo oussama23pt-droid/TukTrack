@@ -706,6 +706,7 @@ export default function DriverDashboard() {
         status: 'offline',
         currentLat: null,
         currentLng: null,
+        location: null,
         lastUpdated: serverTimestamp()
       });
       setIsOnline(false);
