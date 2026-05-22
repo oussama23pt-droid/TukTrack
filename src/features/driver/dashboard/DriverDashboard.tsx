@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { GlassCard } from '../../../components/GlassCard';
 import { GradientButton } from '../../../components/GradientButton';
-import { Play, Square, AlertTriangle, List, TrendingUp, DollarSign, Shield, Users, MapPin, Clock, Timer, Loader2, X, CheckCircle2, Activity, Navigation } from 'lucide-react';
+import { Play, Square, AlertTriangle, List, TrendingUp, DollarSign, Shield, Users, MapPin, Clock, Timer, Loader2, X, CheckCircle2, Activity, Navigation, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../../lib/utils';
 import { useAuth } from '../../auth/AuthContext';
@@ -54,6 +54,9 @@ export default function DriverDashboard() {
   const [lastCoords, setLastCoords] = useState<{lat: number, lng: number} | null>(null);
   const [managerInfo, setManagerInfo] = useState<any>(null);
   const gpsWarningSentRef = React.useRef<boolean>(false);
+  const [showBackgroundPermissionModal, setShowBackgroundPermissionModal] = useState(false);
+  const [showOverlayPermissionModal, setShowOverlayPermissionModal] = useState(false);
+  const overlayPermissionGranted = React.useRef<boolean>(false);
 
   // Fetch manager info
   useEffect(() => {
@@ -432,8 +435,10 @@ export default function DriverDashboard() {
   }, [userData?.managerId, user?.uid]);
 
   useEffect(() => {
+    // Don't override online status to false when a shift is active — shift enforces online
+    if (!userData?.isOnline && activeShift) return;
     setIsOnline(userData?.isOnline || false);
-  }, [userData?.isOnline]);
+  }, [userData?.isOnline, activeShift]);
 
   useEffect(() => {
     if (userData?.activeTripId) {
@@ -645,6 +650,13 @@ export default function DriverDashboard() {
       return;
     }
 
+    // On Median mobile: request overlay permission first (if not already granted)
+    // This enables the app to display over other apps while driver is online
+    if ((window as any).median?.backgroundLocation && !overlayPermissionGranted.current) {
+      setShowOverlayPermissionModal(true);
+      return; // Modal will call handleGoOnline() again after permission
+    }
+
     setIsActionLoading(true);
     try {
       // Explicit permission query
@@ -653,7 +665,6 @@ export default function DriverDashboard() {
         const permission = await navigator.permissions.query({ name: 'geolocation' as any });
         state = permission.state;
       } catch (e) {
-        // Fallback for some browsers/webviews
         console.warn('Permissions API not supported, proceeding with direct request');
       }
 
@@ -678,7 +689,13 @@ export default function DriverDashboard() {
               },
               lastUpdated: serverTimestamp()
             });
-            startLocationTracking(); // handles Median background OR browser watchPosition
+            // On Median mobile: show background location permission modal before tracking
+            if ((window as any).median?.backgroundLocation) {
+              setShowBackgroundPermissionModal(true);
+              // Modal will call startLocationTracking() after user interaction
+            } else {
+              startLocationTracking(); // web browser fallback
+            }
             setIsOnline(true);
             setLocationStatus('active');
           } catch (err) {
@@ -705,33 +722,35 @@ export default function DriverDashboard() {
   };
 
   const toggleShift = async () => {
-    if (!user) return;
+    if (!user || !userData) return;
     
     if (!isOnline) {
       return handleGoOnline();
     }
-    
-    // Restricted: Cannot go offline during a shift
-    if (isOnline && activeShift && activeShift.driverUid === user.uid) {
-      // Send notification to manager
-      addDoc(collection(db, 'notifications'), {
-        managerId: userData.managerId,
-        type: 'gps_off_attempt',
-        title: 'Tentativa de Sair de Serviço',
-        message: `O motorista ${userData.name} tentou desativar o GPS durante um turno de equipa ativo.`,
-        driverUid: user.uid,
-        driverName: userData.name,
-        createdAt: new Date().toISOString(),
-        read: false,
-        isForDrivers: false
-      }).catch(err => handleFirestoreError(err, 'create' as any, 'notifications'));
 
-      alert('Não pode sair de serviço enquanto um turno de equipa está ativo. O Gestor controla a duração do turno.');
+    // HARD BLOCK: Cannot go offline during a manager-initiated shift
+    if (activeShift && activeShift.driverUid === user.uid) {
+      try {
+        await addDoc(collection(db, 'notifications'), {
+          managerId: userData.managerId,
+          type: 'gps_off_attempt',
+          title: '⚠️ Tentativa de Sair de Serviço',
+          message: `O motorista ${userData.name || 'Desconhecido'} tentou desativar o GPS durante um turno ativo.`,
+          driverUid: user.uid,
+          driverName: userData.name || 'Desconhecido',
+          createdAt: new Date().toISOString(),
+          read: false,
+          isForDrivers: false
+        });
+      } catch (err) {
+        console.error('Failed to send offline-attempt notification:', err);
+      }
+      alert('Não pode sair de serviço enquanto um turno está ativo. O Gestor controla a duração do turno.');
       return;
     }
 
-    // Restricted: Cannot go offline during a trip
-    if (isOnline && activeTrip) {
+    // BLOCK: Cannot go offline during an active trip
+    if (activeTrip) {
       alert('Não pode sair de serviço enquanto tem uma viagem em curso. Termine a viagem primeiro.');
       return;
     }
@@ -1044,18 +1063,27 @@ export default function DriverDashboard() {
         onClick={toggleShift}
         className={cn(
           "w-full h-28 rounded-[2rem] flex items-center justify-between px-8 shadow-2xl transition-all duration-500 relative overflow-hidden group",
-          isOnline 
-            ? "glass-card-light border-green-500/30 text-green-600 bg-green-50/50" 
-            : "glass-card-light border-slate-200 text-slate-400",
-          isOnline && activeTrip && "cursor-not-allowed opacity-80"
+          activeShift
+            ? "glass-card-light border-amber/40 text-amber bg-amber/5 cursor-not-allowed"
+            : isOnline 
+              ? "glass-card-light border-green-500/30 text-green-600 bg-green-50/50" 
+              : "glass-card-light border-slate-200 text-slate-400",
+          !activeShift && isOnline && activeTrip && "cursor-not-allowed opacity-80"
         )}
       >
         <div className="flex items-center space-x-4">
           <div className={cn(
             "p-4 rounded-2xl transition-colors relative",
-            isOnline ? "bg-green-100 text-green-600" : "bg-slate-100 text-slate-400"
+            activeShift ? "bg-amber/10 text-amber" : isOnline ? "bg-green-100 text-green-600" : "bg-slate-100 text-slate-400"
           )}>
-            {isOnline ? (
+            {activeShift ? (
+              <div className="relative">
+                <Lock fill="currentColor" size={24} />
+                <div className="absolute -top-1 -right-1 bg-white rounded-full p-0.5 border border-amber/30 shadow-sm">
+                  <Shield size={10} className="text-amber fill-current" />
+                </div>
+              </div>
+            ) : isOnline ? (
               <div className="relative">
                 <Square fill="currentColor" size={24} />
                 {activeTrip && (
@@ -1068,11 +1096,11 @@ export default function DriverDashboard() {
           </div>
           <div className="text-left">
             <span className="text-2xl font-display font-black block">
-              {isOnline ? 'ONLINE' : 'OFFLINE'}
+              {activeShift ? 'TURNO ATIVO' : isOnline ? 'ONLINE' : 'OFFLINE'}
             </span>
             <span className="text-xs font-medium opacity-70">
               {activeShift 
-                ? 'Turno de Operações Ativo (Obrigatório)'
+                ? 'Bloqueado pelo Gestor — não pode sair de serviço'
                 : activeTrip 
                   ? 'Em viagem (status fixo)' 
                   : isOnline 
@@ -1083,8 +1111,7 @@ export default function DriverDashboard() {
         </div>
         <div className={cn(
           "w-3 h-3 rounded-full animate-pulse",
-          isOnline ? "bg-green-500 shadow-[0_0_15px_rgba(34,197,94,0.5)]" : "bg-slate-300",
-          activeShift && "bg-amber shadow-[0_0_15px_rgba(245,158,11,0.5)]"
+          activeShift ? "bg-amber shadow-[0_0_15px_rgba(245,158,11,0.5)]" : isOnline ? "bg-green-500 shadow-[0_0_15px_rgba(34,197,94,0.5)]" : "bg-slate-300"
         )} />
       </motion.button>
 
@@ -1501,6 +1528,150 @@ export default function DriverDashboard() {
         onClose={() => setShowLocationInstructions(false)}
         onRetry={handleGoOnline}
       />
+
+      {/* Overlay Permission Modal — "Display over other apps" */}
+      <AnimatePresence>
+        {showOverlayPermissionModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[350] bg-navy/95 backdrop-blur-xl flex items-end justify-center p-6"
+          >
+            <motion.div
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              className="bg-navy border border-white/10 rounded-[2rem] p-8 w-full max-w-md shadow-2xl"
+            >
+              {/* Icon */}
+              <div className="w-20 h-20 bg-amber/10 rounded-[2rem] flex items-center justify-center mx-auto mb-5 border border-amber/20">
+                <div className="text-4xl">📱</div>
+              </div>
+
+              <div className="flex items-center justify-center space-x-2 mb-3">
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-amber">Permissão Necessária</span>
+              </div>
+
+              <h3 className="text-2xl font-black text-white text-center mb-4 leading-tight italic">
+                Manter App Visível
+              </h3>
+
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-5 mb-6">
+                <p className="text-slate-300 text-sm font-medium leading-relaxed mb-4">
+                  Para que o TukTrack continue a funcionar enquanto usa outras aplicações, precisamos da permissão <strong className="text-amber">"Superposição sobre outras apps"</strong>.
+                </p>
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-amber mb-2">No próximo ecrã:</p>
+                  <div className="flex items-start space-x-2">
+                    <span className="text-amber font-black text-sm">1.</span>
+                    <span className="text-slate-300 text-xs font-medium">Encontre <strong className="text-white">TukTrack</strong> na lista</span>
+                  </div>
+                  <div className="flex items-start space-x-2">
+                    <span className="text-amber font-black text-sm">2.</span>
+                    <span className="text-slate-300 text-xs font-medium">Toque em <strong className="text-white">TukTrack</strong></span>
+                  </div>
+                  <div className="flex items-start space-x-2">
+                    <span className="text-amber font-black text-sm">3.</span>
+                    <span className="text-slate-300 text-xs font-medium">Ative <strong className="text-amber">"Autorizar superposição"</strong></span>
+                  </div>
+                  <div className="flex items-start space-x-2">
+                    <span className="text-amber font-black text-sm">4.</span>
+                    <span className="text-slate-300 text-xs font-medium">Volte ao TukTrack e prima <strong className="text-white">GO!</strong></span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col space-y-3">
+                <button
+                  onClick={async () => {
+                    setShowOverlayPermissionModal(false);
+                    overlayPermissionGranted.current = true;
+                    // Request SYSTEM_ALERT_WINDOW — opens Android settings for this permission
+                    if ((window as any).median?.permissions) {
+                      try {
+                        await (window as any).median.permissions.request({
+                          permission: 'android.permission.SYSTEM_ALERT_WINDOW'
+                        });
+                      } catch (e) {
+                        console.warn('Overlay permission request failed:', e);
+                      }
+                    }
+                    // After returning from settings, proceed with going online
+                    handleGoOnline();
+                  }}
+                  className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm"
+                >
+                  Abrir Definições de Permissão
+                </button>
+                <button
+                  onClick={() => {
+                    setShowOverlayPermissionModal(false);
+                    overlayPermissionGranted.current = true; // skip next time
+                    handleGoOnline(); // proceed without overlay
+                  }}
+                  className="w-full h-12 text-slate-400 font-bold text-sm hover:text-slate-200 transition-colors"
+                >
+                  Continuar sem esta permissão
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Background Location Permission Modal */}
+      <AnimatePresence>
+        {showBackgroundPermissionModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-sm flex items-end justify-center p-6"
+          >
+            <motion.div
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl"
+            >
+              <div className="w-16 h-16 bg-amber/10 rounded-full flex items-center justify-center mx-auto mb-5 text-amber">
+                <MapPin size={32} />
+              </div>
+              <h3 className="text-xl font-black text-navy text-center mb-2">Localização em Segundo Plano</h3>
+              <p className="text-sm text-slate-500 text-center font-medium mb-6 leading-relaxed">
+                Para partilhar a sua localização enquanto usa outras aplicações, o TukTrack precisa de acesso à localização em segundo plano.<br/><br/>
+                No próximo ecrã, selecione <strong>"Permitir sempre"</strong>.
+              </p>
+              <div className="flex flex-col space-y-3">
+                <button
+                  onClick={async () => {
+                    setShowBackgroundPermissionModal(false);
+                    if ((window as any).median?.permissions) {
+                      try {
+                        await (window as any).median.permissions.request({ permission: 'android.permission.ACCESS_BACKGROUND_LOCATION' });
+                      } catch (e) { console.warn('bg permission err', e); }
+                    }
+                    startLocationTracking();
+                  }}
+                  className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
+                >
+                  Permitir Localização em Segundo Plano
+                </button>
+                <button
+                  onClick={() => {
+                    setShowBackgroundPermissionModal(false);
+                    startLocationTracking();
+                  }}
+                  className="w-full h-12 text-slate-400 font-bold text-sm"
+                >
+                  Continuar sem segundo plano
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {userData?.managerId && (
         <div className="flex items-center justify-center space-x-2 text-slate-300 py-6">
