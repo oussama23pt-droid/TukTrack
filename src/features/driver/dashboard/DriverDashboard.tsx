@@ -94,8 +94,7 @@ export default function DriverDashboard() {
       (err) => {
         setLocationStatus('disabled');
         if (err.code !== err.PERMISSION_DENIED) {
-          const hasSeenModal = localStorage.getItem('tuktrack_location_modal_seen');
-          if (!hasSeenModal) setShowLocationModal(true);
+          setShowLocationModal(true);
         }
       },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
@@ -104,7 +103,6 @@ export default function DriverDashboard() {
 
   const requestLocationPermission = () => {
     setShowLocationModal(false);
-    localStorage.setItem('tuktrack_location_modal_seen', 'true');
     
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -180,20 +178,7 @@ export default function DriverDashboard() {
     }
   }, [showMap, currentCoords]);
 
-  useEffect(() => {
-    if (locationStatus !== 'active') return;
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        setCurrentCoords({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude
-        });
-      },
-      (err) => console.error('Map location watch error:', err),
-      { enableHighAccuracy: true }
-    );
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [locationStatus]);
+  // currentCoords is updated by startLocationTracking watchPosition - no duplicate needed
 
   useEffect(() => {
     if (!user) return;
@@ -536,24 +521,25 @@ export default function DriverDashboard() {
 
     return () => unsub();
   }, [user]);
-  const startBackgroundLocation = () => {
-  if (!(window as any).median) return;
-  const locationRequest = {
-    callback: 'medianLocationUpdated',
-    androidPriority: 'highAccuracy',
-    androidInterval: 10000,
-    androidFastestInterval: 5000,
-    androidNotificationTitle: '🟢 TukTrack — Online',
-    androidNotificationText: 'A partilhar localização em tempo real. Toque para abrir a aplicação.'
-  };
-  (window as any).median.backgroundLocation.start(locationRequest);
-};
 
-const stopBackgroundLocation = () => {
-  if ((window as any).median) {
-    (window as any).median.backgroundLocation.stop();
-  }
-};
+  const startBackgroundLocation = () => {
+    if (!(window as any).median) return;
+    const locationRequest = {
+      callback: 'medianLocationUpdated',
+      androidPriority: 'highAccuracy',
+      androidInterval: 10000,
+      androidFastestInterval: 5000,
+      androidNotificationTitle: '🟢 TukTrack — Online',
+      androidNotificationText: 'A partilhar localização em tempo real. Toque para abrir a aplicação.'
+    };
+    (window as any).median.backgroundLocation.start(locationRequest);
+  };
+
+  const stopBackgroundLocation = () => {
+    if ((window as any).median) {
+      (window as any).median.backgroundLocation.stop();
+    }
+  };
 
   const startLocationTracking = () => {
     if (locationWatchRef.current !== null) {
