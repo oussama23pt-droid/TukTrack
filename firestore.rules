@@ -118,6 +118,7 @@ service cloud.firestore {
     match /shifts/{id} {
       allow read: if isSignedIn() && (
         resource.data.get('managerId', '') == authUid() ||
+        resource.data.get('driverUid', '') == authUid() ||
         (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
       );
       allow write: if isManager();
