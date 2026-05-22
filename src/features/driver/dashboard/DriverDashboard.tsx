@@ -409,11 +409,11 @@ export default function DriverDashboard() {
     if (!userData?.managerId) return;
 
     const shiftQuery = query(
-  collection(db, 'shifts'),
-  where('driverUid', '==', user?.uid),
-  where('status', '==', 'active'),
-  limit(1)
-);
+      collection(db, 'shifts'),
+      where('managerId', '==', userData.managerId),
+      where('status', '==', 'active'),
+      limit(1)
+    );
 
     const unsub = onSnapshot(shiftQuery, (snapshot) => {
       if (!snapshot.empty) {
@@ -435,11 +435,17 @@ export default function DriverDashboard() {
   }, [userData?.managerId, user?.uid]);
 
   useEffect(() => {
-    // Don't override online status to false when a shift is active — shift enforces online
-    if (!userData?.isOnline && activeShift) return;
+    // If a manager shift is active, driver MUST stay online regardless of any Firestore update
+    if (activeShift) {
+      setIsOnline(true);
+      if (!userData?.isOnline && user?.uid) {
+        // Re-enforce online in Firestore in case something set it to false
+        updateDoc(doc(db, 'users', user.uid), { isOnline: true, status: 'online' }).catch(console.error);
+      }
+      return;
+    }
     setIsOnline(userData?.isOnline || false);
-  }, [userData?.isOnline, activeShift]);
-
+  }, [userData?.isOnline, activeShift, user?.uid]);
   useEffect(() => {
     if (userData?.activeTripId) {
       setLocalActiveTripId(userData.activeTripId);
@@ -729,10 +735,10 @@ export default function DriverDashboard() {
     }
 
     // HARD BLOCK: Cannot go offline during a manager-initiated shift
-    if (activeShift && activeShift.driverUid === user.uid) {
+    if (activeShift) {
       try {
         await addDoc(collection(db, 'notifications'), {
-          managerId: userData.managerId,
+          managerId: activeShift.managerId || userData.managerId,
           type: 'gps_off_attempt',
           title: '⚠️ Tentativa de Sair de Serviço',
           message: `O motorista ${userData.name || 'Desconhecido'} tentou desativar o GPS durante um turno ativo.`,
