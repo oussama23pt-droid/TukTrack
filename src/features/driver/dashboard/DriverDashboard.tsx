@@ -419,11 +419,6 @@ export default function DriverDashboard() {
       if (!snapshot.empty) {
         const shiftData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
         setActiveShift(shiftData);
-        // Force online if shift is active
-        if (!isOnline) {
-          setIsOnline(true);
-          updateDoc(doc(db, 'users', user?.uid!), { isOnline: true }).catch(console.error);
-        }
       } else {
         setActiveShift(null);
       }
@@ -435,17 +430,14 @@ export default function DriverDashboard() {
   }, [userData?.managerId, user?.uid]);
 
   useEffect(() => {
-    // If a manager shift is active, driver MUST stay online regardless of any Firestore update
+    // If a manager shift is active, keep UI showing online — do NOT write to Firestore here
+    // (the toggleShift function already handles the Firestore write and block)
     if (activeShift) {
       setIsOnline(true);
-      if (!userData?.isOnline && user?.uid) {
-        // Re-enforce online in Firestore in case something set it to false
-        updateDoc(doc(db, 'users', user.uid), { isOnline: true, status: 'online' }).catch(console.error);
-      }
       return;
     }
     setIsOnline(userData?.isOnline || false);
-  }, [userData?.isOnline, activeShift, user?.uid]);
+  }, [userData?.isOnline, activeShift]);
   useEffect(() => {
     if (userData?.activeTripId) {
       setLocalActiveTripId(userData.activeTripId);
