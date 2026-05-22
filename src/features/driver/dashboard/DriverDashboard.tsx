@@ -249,6 +249,8 @@ export default function DriverDashboard() {
 
     (window as any).medianLocationUpdated = async (location: any) => {
       if (!location?.latitude || !location?.longitude) return;
+      // Guard: do not write location if driver is offline
+      if (!(window as any)._tuktrack_isOnline) return;
       const now = Date.now();
       if (now - lastUpdateRef.current < 8000) {
         setCurrentCoords({ lat: location.latitude, lng: location.longitude });
@@ -430,14 +432,13 @@ export default function DriverDashboard() {
   }, [userData?.managerId, user?.uid]);
 
   useEffect(() => {
-    // If a manager shift is active, keep UI showing online — do NOT write to Firestore here
-    // (the toggleShift function already handles the Firestore write and block)
-    if (activeShift) {
-      setIsOnline(true);
-      return;
-    }
-    setIsOnline(userData?.isOnline || false);
-  }, [userData?.isOnline, activeShift]);
+    // Sync local isOnline state with Firestore — no override here
+    // The shift block is handled entirely in toggleShift()
+    const online = userData?.isOnline || false;
+    setIsOnline(online);
+    // Expose to window so Median background callback can guard itself
+    (window as any)._tuktrack_isOnline = online;
+  }, [userData?.isOnline]);
   useEffect(() => {
     if (userData?.activeTripId) {
       setLocalActiveTripId(userData.activeTripId);
@@ -624,7 +625,10 @@ export default function DriverDashboard() {
       (err) => {
         console.error('watchPosition error:', err);
         setLocationStatus('disabled');
-        setTimeout(() => startLocationTracking(), 5000);
+        // Only retry if still online — prevents restart loop after going offline
+        if (locationWatchRef.current !== null) {
+          setTimeout(() => startLocationTracking(), 5000);
+        }
       },
       { enableHighAccuracy: true, timeout: 30000, maximumAge: 0 }
     );
@@ -755,6 +759,7 @@ export default function DriverDashboard() {
 
     setIsActionLoading(true);
     try {
+      (window as any)._tuktrack_isOnline = false; // stop Median callback writes immediately
       stopLocationTracking();
       stopBackgroundLocation();
       await updateDoc(doc(db, 'users', user.uid), {
