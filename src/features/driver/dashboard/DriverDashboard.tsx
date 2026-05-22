@@ -699,7 +699,6 @@ export default function DriverDashboard() {
 
     setIsActionLoading(true);
     try {
-    try {
       stopLocationTracking();
       stopBackgroundLocation();
       await updateDoc(doc(db, 'users', user.uid), {
