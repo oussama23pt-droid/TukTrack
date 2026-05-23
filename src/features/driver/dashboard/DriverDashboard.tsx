@@ -1744,12 +1744,7 @@ export default function DriverDashboard() {
                       (window as any).median.share.openBrowser({ url: 'package:' + 'co.median.android.bnead' });
                     } else {
                       // Fallback: show alert with manual instructions
-                      alert('Para ativar a localização em segundo plano:
-
-1. Abra as Definições do telemóvel
-2. Aplicações → TukTrack
-3. Permissões → Localização
-4. Selecione "Permitir sempre"');
+                      alert('Para ativar localizacao em segundo plano: Definicoes > Aplicacoes > TukTrack > Permissoes > Localizacao > Permitir sempre');
                     }
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
