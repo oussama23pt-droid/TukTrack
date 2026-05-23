@@ -682,44 +682,54 @@ export default function DriverDashboard() {
 
   const showOnlineNotification = async () => {
     try {
-      const { LocalNotifications } = await import('@capacitor/local-notifications');
-      // Ensure channels exist before scheduling
-      await ensureNotificationChannel(LocalNotifications);
-      // Request POST_NOTIFICATIONS permission (Android 13+)
-      const perm = await LocalNotifications.requestPermissions();
-      if (perm.display !== 'granted') {
-        console.warn('[Notif] Notification permission denied');
+      // Use the native Android Foreground Service via the JS bridge.
+      // This is the ONLY reliable way to show a persistent, non-dismissable
+      // notification and keep the app alive in the background on Android.
+      const bridge = (window as any).AndroidBridge;
+      if (bridge && typeof bridge.startForegroundTracking === 'function') {
+        bridge.startForegroundTracking();
+        console.log('[Notif] Native foreground service started');
         return;
       }
-      // Cancel any existing online notification first to avoid duplicates
+      // Fallback for web/PWA: use LocalNotifications (best effort, not sticky)
+      const { LocalNotifications } = await import('@capacitor/local-notifications');
+      await ensureNotificationChannel(LocalNotifications);
+      const perm = await LocalNotifications.requestPermissions();
+      if (perm.display !== 'granted') return;
       try { await LocalNotifications.cancel({ notifications: [{ id: NOTIF_ID }] }); } catch (_) {}
       await LocalNotifications.schedule({
-        notifications: [
-          {
-            id: NOTIF_ID,
-            title: '🟢 TukTrack — Em Serviço',
-            body: 'A partilhar localização em segundo plano. Toque para abrir.',
-            ongoing: true,       // sticky — cannot be swiped away by driver
-            autoCancel: false,
-            channelId: 'tuktrack_foreground',
-            smallIcon: 'ic_stat_icon',
-            iconColor: '#F59E0B',
-            schedule: { at: new Date(Date.now() + 100) },
-          },
-        ],
+        notifications: [{
+          id: NOTIF_ID,
+          title: '🟢 TukTrack — Em Serviço',
+          body: 'A partilhar localização em segundo plano. Toque para abrir.',
+          ongoing: true,
+          autoCancel: false,
+          channelId: 'tuktrack_foreground',
+          smallIcon: 'ic_stat_icon',
+          iconColor: '#F59E0B',
+          schedule: { at: new Date(Date.now() + 100) },
+        }],
       });
-      console.log('[Notif] Online notification shown');
+      console.log('[Notif] Web fallback notification shown');
     } catch (e) {
-      console.warn('[Notif] LocalNotifications not available (web):', e);
+      console.warn('[Notif] Notification failed:', e);
     }
   };
 
   const cancelOnlineNotification = async () => {
     try {
+      // Stop the native foreground service — removes notification immediately
+      const bridge = (window as any).AndroidBridge;
+      if (bridge && typeof bridge.stopForegroundTracking === 'function') {
+        bridge.stopForegroundTracking();
+        console.log('[Notif] Native foreground service stopped');
+        return;
+      }
+      // Fallback for web/PWA
       const { LocalNotifications } = await import('@capacitor/local-notifications');
       await LocalNotifications.cancel({ notifications: [{ id: NOTIF_ID }] });
-      console.log('[Notif] Online notification cancelled');
-    } catch (e) { /* web — ignore */ }
+      console.log('[Notif] Web fallback notification cancelled');
+    } catch (e) { /* ignore */ }
   };
 
   // Send a push-style local notification when manager starts a shift
@@ -739,7 +749,7 @@ export default function DriverDashboard() {
             ongoing: false,
             autoCancel: true,
             channelId: 'tuktrack_alerts',
-            smallIcon: 'ic_stat_icon',
+            smallIcon: 'ic_launcher_foreground',
             iconColor: '#F59E0B',
             schedule: { at: new Date(Date.now() + 200) },
           },
