@@ -750,33 +750,49 @@ export default function DriverDashboard() {
   };
 
   // ─── OVERLAY ("Display over other apps") PERMISSION ──────────────────────────
-  // Opens Android Settings → Apps → TukTrack → Display over other apps
-  const openOverlaySettings = async () => {
-    try {
-      // Use the native AndroidBridge JavascriptInterface injected by MainActivity.kt.
-      // This fires Settings.ACTION_MANAGE_OVERLAY_PERMISSION directly, which opens
-      // the "Display over other apps" screen with TukTrack visible in the list.
-      if ((window as any).AndroidBridge) {
-        (window as any).AndroidBridge.openOverlaySettings();
-      } else {
-        // Fallback for web / iOS
-        alert('Vá a: Definições > Aplicações > TukTrack > Permissões especiais > Aparecer por cima de outras apps → Ativar');
-      }
-    } catch (e) {
+  // Calls AndroidBridge.openOverlaySettings() injected by MainActivity.kt.
+  // This fires Settings.ACTION_MANAGE_OVERLAY_PERMISSION which opens the
+  // "Display over other apps" screen with TukTrack listed and toggleable.
+  const openOverlaySettings = () => {
+    if ((window as any).AndroidBridge) {
+      (window as any).AndroidBridge.openOverlaySettings();
+    } else {
       alert('Vá a: Definições > Aplicações > TukTrack > Permissões especiais > Aparecer por cima de outras apps → Ativar');
+    }
+  };
+
+  // Check if overlay permission was granted after driver returns from Settings
+  const checkOverlayOnResume = () => {
+    if ((window as any).AndroidBridge?.isOverlayGranted?.()) {
+      overlayPermissionGranted.current = true;
+      localStorage.setItem('tuktrack_overlay_granted', 'true');
     }
   };
 
   const requestOverlayPermission = () => {
     if (overlayPermissionGranted.current) return;
-    // Show the overlay permission modal — works on APK and web (web just skips)
+    // If AndroidBridge is available, check live state first
+    if ((window as any).AndroidBridge?.isOverlayGranted?.()) {
+      overlayPermissionGranted.current = true;
+      localStorage.setItem('tuktrack_overlay_granted', 'true');
+      return;
+    }
     setShowOverlayPermissionModal(true);
   };
 
   // ─── "ALLOW ALL THE TIME" LOCATION PERMISSION ────────────────────────────────
-  // Opens Android Settings for the app so user can change location to "Allow all the time"
+  // On Android 10+ ACCESS_BACKGROUND_LOCATION must be requested SEPARATELY
+  // after ACCESS_FINE_LOCATION is already granted. We first try the runtime
+  // dialog via AndroidBridge.requestBackgroundLocation(); if that's unavailable
+  // or already granted, we open App Settings so the driver can set it manually.
   const requestBackgroundLocationPermission = () => {
     if (backgroundLocationGranted.current) return;
+    // Check live state
+    if ((window as any).AndroidBridge?.isBackgroundLocationGranted?.()) {
+      backgroundLocationGranted.current = true;
+      localStorage.setItem('tuktrack_bg_location_granted', 'true');
+      return;
+    }
     setTimeout(() => setShowBackgroundPermissionModal(true), 600);
   };
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1792,15 +1808,24 @@ export default function DriverDashboard() {
 
               <div className="flex flex-col space-y-3">
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     setShowOverlayPermissionModal(false);
-                    overlayPermissionGranted.current = true;
-                    localStorage.setItem('tuktrack_overlay_granted', 'true');
-                    // Open Android system settings for overlay permission
-                    await openOverlaySettings();
-                    // After returning from settings, show background location modal
+                    // Open the native Settings screen — driver toggles TukTrack on
+                    openOverlaySettings();
+                    // Poll for 10s after driver returns from Settings to detect grant
+                    let checks = 0;
+                    const poll = setInterval(() => {
+                      checks++;
+                      if ((window as any).AndroidBridge?.isOverlayGranted?.()) {
+                        overlayPermissionGranted.current = true;
+                        localStorage.setItem('tuktrack_overlay_granted', 'true');
+                        clearInterval(poll);
+                      }
+                      if (checks >= 20) clearInterval(poll);
+                    }, 500);
+                    // Show background location modal after delay
                     if (!backgroundLocationGranted.current) {
-                      setTimeout(() => setShowBackgroundPermissionModal(true), 1000);
+                      setTimeout(() => setShowBackgroundPermissionModal(true), 1500);
                     }
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm"
@@ -1852,21 +1877,35 @@ export default function DriverDashboard() {
               </p>
               <div className="flex flex-col space-y-3">
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     setShowBackgroundPermissionModal(false);
-                    backgroundLocationGranted.current = true;
-                    localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                    // Open Android App Settings → Permissions → Location
-                    // Driver changes to "Allow all the time" manually
-                    try {
-                      if ((window as any).AndroidBridge) {
-                        // Fires ACTION_APPLICATION_DETAILS_SETTINGS directly →
-                        // Settings > Apps > TukTrack > Permissions > Location > Allow all the time
-                        (window as any).AndroidBridge.openAppSettings();
+                    if ((window as any).AndroidBridge) {
+                      // Step 1: try the runtime permission dialog first
+                      // (works if ACCESS_FINE_LOCATION is already granted)
+                      const alreadyGranted = (window as any).AndroidBridge.requestBackgroundLocation();
+                      if (!alreadyGranted) {
+                        // Poll until driver grants it or gives up
+                        let checks = 0;
+                        const poll = setInterval(() => {
+                          checks++;
+                          if ((window as any).AndroidBridge?.isBackgroundLocationGranted?.()) {
+                            backgroundLocationGranted.current = true;
+                            localStorage.setItem('tuktrack_bg_location_granted', 'true');
+                            clearInterval(poll);
+                          }
+                          // After 15s if still not granted, open App Settings
+                          if (checks >= 30) {
+                            clearInterval(poll);
+                            if (!(window as any).AndroidBridge?.isBackgroundLocationGranted?.()) {
+                              (window as any).AndroidBridge.openAppSettings();
+                            }
+                          }
+                        }, 500);
                       } else {
-                        alert('Vá a: Definições > Aplicações > TukTrack > Permissões > Localização > Permitir sempre');
+                        backgroundLocationGranted.current = true;
+                        localStorage.setItem('tuktrack_bg_location_granted', 'true');
                       }
-                    } catch (e) {
+                    } else {
                       alert('Vá a: Definições > Aplicações > TukTrack > Permissões > Localização > Permitir sempre');
                     }
                   }}
