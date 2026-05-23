@@ -14,30 +14,52 @@ import { LocationPermissionModal } from '../../../components/LocationPermissionM
 import { LocationInstructionsModal } from '../../../components/LocationInstructionsModal';
 import Map, { Marker, Source, Layer, NavigationControl } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { useAndroidPermissions } from '../../../hooks/useAndroidPermissions';
-import { OverlayPermissionModal } from '../../../components/OverlayPermissionModal';
-import { BackgroundLocationModal } from '../../../components/BackgroundLocationModal';
 
 // @ts-ignore
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
 
-// ─── CAPACITOR BACKGROUND GEOLOCATION ────────────────────────────────────────
-// Uses @capacitor-community/background-geolocation for true background tracking
-// Falls back to watchPosition on web browser
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Module-level store shared between the React component and background callbacks.
-// Declared outside the component so it survives re-renders and is accessible
-// from Median/Capacitor native callbacks that run outside the React lifecycle.
-const _store: {
-  isOnline: boolean;
-  latestCoords: { lat: number; lng: number } | null;
-  onCoordsUpdate: ((coords: { lat: number; lng: number }) => void) | null;
-} = {
+// ─── MODULE-LEVEL LOCATION STORE ─────────────────────────────────────────────
+// Lives completely outside React so Android WebView never loses it on re-renders,
+// background/foreground transitions, or hot reloads.
+const _store = {
   isOnline: false,
-  latestCoords: null,
-  onCoordsUpdate: null,
+  uid: null as string | null,
+  lastFirestoreWrite: 0,
+  latestCoords: null as { lat: number; lng: number } | null,
+  onCoordsUpdate: null as ((coords: { lat: number; lng: number }) => void) | null,
 };
+
+// Register callback at module load time — Median calls this from native via evaluateJavascript
+window.medianLocationUpdated = async (location: any) => {
+  if (!location?.latitude || !location?.longitude) return;
+  if (!_store.isOnline) return;
+  if (!_store.uid) return;
+
+  const lat = Number(location.latitude);
+  const lng = Number(location.longitude);
+
+  // Always push coords to React immediately via the registered callback
+  _store.latestCoords = { lat, lng };
+  if (_store.onCoordsUpdate) _store.onCoordsUpdate({ lat, lng });
+
+  // Throttle Firestore writes to every 4 seconds
+  const now = Date.now();
+  if (now - _store.lastFirestoreWrite < 4000) return;
+  _store.lastFirestoreWrite = now;
+
+  try {
+    await updateDoc(doc(db, 'users', _store.uid), {
+      location: { lat, lng, updatedAt: new Date().toISOString() },
+      currentLat: lat,
+      currentLng: lng,
+      locationAccuracy: location.accuracy ?? null,
+      lastUpdated: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error('[Median] Firestore write error:', err);
+  }
+};
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function DriverDashboard() {
   const { user, userData } = useAuth();
@@ -47,6 +69,7 @@ export default function DriverDashboard() {
   const [activeSosId, setActiveSosId] = useState<string | null>(null);
   const [isSOSLoading, setIsSOSLoading] = useState(false);
   const [locationWatchId, setLocationWatchId] = useState<number | null>(null);
+  const [shiftNotification, setShiftNotification] = useState<{title: string, message: string} | null>(null);
   const locationWatchRef = React.useRef<number | null>(null);
   const [isTripModalOpen, setIsTripModalOpen] = useState(false);
   const lastUpdateRef = React.useRef<number>(0);
@@ -77,9 +100,10 @@ export default function DriverDashboard() {
   const gpsWarningSentRef = React.useRef<boolean>(false);
   const [showBackgroundPermissionModal, setShowBackgroundPermissionModal] = useState(false);
   const [showOverlayPermissionModal, setShowOverlayPermissionModal] = useState(false);
+  const overlayPermissionGranted = React.useRef<boolean>(localStorage.getItem('tuktrack_overlay_granted') === 'true');
+  const backgroundLocationGranted = React.useRef<boolean>(localStorage.getItem('tuktrack_bg_location_granted') === 'true');
   const [showShiftStartModal, setShowShiftStartModal] = useState(false);
   const prevActiveShiftRef = React.useRef<any>(null);
-  const androidPerms = useAndroidPermissions();
 
 
   // Fetch manager info
@@ -282,10 +306,14 @@ export default function DriverDashboard() {
   // We use only refs inside the callback — no React state setters — to avoid stale closure issues.
   // A setInterval polls the ref every 2 seconds and pushes coords into React state safely.
 
-  // Keep uid ref in sync for background geolocation callback
+  // Sync _store with current React state — keeps the module-level callback accurate
   useEffect(() => {
-    _uidRef.current = user?.uid || null;
+    _store.uid = user?.uid || null;
   }, [user?.uid]);
+
+  useEffect(() => {
+    _store.isOnline = isOnline;
+  }, [isOnline]);
 
   // Register the React coords setter into the store so the callback can push updates
   useEffect(() => {
@@ -438,7 +466,6 @@ export default function DriverDashboard() {
         // Only show the modal when shift STARTS (transitions from no shift to active shift)
         if (!prevActiveShiftRef.current) {
           setShowShiftStartModal(true);
-          sendShiftStartNotification(shiftData);
         }
         prevActiveShiftRef.current = shiftData;
         setActiveShift(shiftData);
@@ -584,202 +611,49 @@ export default function DriverDashboard() {
     return () => unsub();
   }, [user]);
 
-  // ─── CAPACITOR BACKGROUND GEOLOCATION ───────────────────────────────────────
-  const startBackgroundLocation = async (): Promise<boolean> => {
+  const startBackgroundLocation = (): boolean => {
+    if (!(window as any).median?.backgroundLocation) return false;
     try {
-      // Dynamically import Capacitor plugin — only available in native APK
-      const { BackgroundGeolocation } = await import('@capacitor-community/background-geolocation');
-
-      await BackgroundGeolocation.addWatcher(
-        {
-          backgroundMessage: 'A partilhar localizacao em segundo plano.',
-          backgroundTitle: 'TukTrack — Online',
-          requestPermissions: true,
-          stale: false,
-          distanceFilter: 10,
-        },
-        async (location, error) => {
-          if (error) {
-            console.error('[BGGeo] Error:', error);
-            return;
-          }
-          if (!location || !isOnlineRef.current || !_uidRef.current) return;
-
-          const lat = location.latitude;
-          const lng = location.longitude;
-
-          setCurrentCoords({ lat, lng });
-          setLocationStatus('active');
-
-          const now = Date.now();
-          if (now - lastUpdateRef.current < 5000) return;
-          lastUpdateRef.current = now;
-
-          try {
-            await updateDoc(doc(db, 'users', _uidRef.current), {
-              location: { lat, lng, updatedAt: new Date().toISOString() },
-              currentLat: lat,
-              currentLng: lng,
-              locationAccuracy: location.accuracy ?? null,
-              lastUpdated: serverTimestamp(),
-            });
-          } catch (err) {
-            console.error('[BGGeo] Firestore write error:', err);
-          }
-        }
-      );
-
-      console.log('[BGGeo] Background geolocation started');
+      (window as any).median.backgroundLocation.start({
+        callback: 'medianLocationUpdated',
+        androidPriority: 'highAccuracy',
+        androidInterval: 5000,
+        androidFastestInterval: 3000,
+        iosDesiredAccuracy: 'best',
+        iosDistanceFilter: 10,
+        androidNotificationTitle: '🟢 TukTrack — Online',
+        androidNotificationText: 'A partilhar localização em tempo real. Toque para abrir a aplicação.',
+        androidNotificationIcon: 'ic_notification',
+      });
+      console.log('[Median] backgroundLocation started successfully');
       return true;
     } catch (e) {
-      console.warn('[BGGeo] Not available, falling back to watchPosition:', e);
+      console.warn('[Median] backgroundLocation.start failed, falling back to watchPosition:', e);
       return false;
     }
   };
 
-  const stopBackgroundLocation = async () => {
-    try {
-      const { BackgroundGeolocation } = await import('@capacitor-community/background-geolocation');
-      await BackgroundGeolocation.removeAllWatchers();
-      console.log('[BGGeo] Stopped');
-    } catch (e) {
-      // Not available on web — ignore
-    }
-  };
-
-  // ─── PERSISTENT FOREGROUND NOTIFICATION ──────────────────────────────────────
-  // Shows a sticky "TukTrack — Online" notification in the Android status bar.
-  // Uses @capacitor/local-notifications — gracefully ignored on web.
-  const NOTIF_ID = 9001;
-  const SHIFT_NOTIF_ID = 9002;
-
-  const ensureNotificationChannel = async (LocalNotifications: any) => {
-    try {
-      await LocalNotifications.createChannel({
-        id: 'tuktrack_foreground',
-        name: 'TukTrack Serviço Ativo',
-        description: 'Notificação persistente enquanto o motorista está online',
-        importance: 4, // HIGH
-        visibility: 1, // PUBLIC — shows on lock screen
-        sound: null,
-        vibration: false,
-        lights: false,
-      });
-      await LocalNotifications.createChannel({
-        id: 'tuktrack_alerts',
-        name: 'TukTrack Alertas',
-        description: 'Alertas de turno e eventos importantes',
-        importance: 5, // MAX
-        visibility: 1,
-        sound: 'default',
-        vibration: true,
-        lights: true,
-      });
-    } catch (e) {
-      // Channel may already exist — safe to ignore
-    }
-  };
-
-  const showOnlineNotification = async () => {
-    try {
-      // PRIMARY: Use native Android Foreground Service via the JS bridge.
-      // This is the ONLY way to get a persistent non-dismissable notification
-      // and keep the app process alive when the driver leaves the app.
-      const bridge = (window as any).AndroidBridge;
-      if (bridge && typeof bridge.startForegroundTracking === 'function') {
-        bridge.startForegroundTracking();
-        console.log('[Notif] Native foreground service started via bridge');
-        return;
+  const stopBackgroundLocation = () => {
+    if ((window as any).median?.backgroundLocation) {
+      try {
+        (window as any).median.backgroundLocation.stop();
+      } catch (e) {
+        console.warn('[Median] backgroundLocation.stop failed:', e);
       }
-      // FALLBACK for web/PWA (bridge not available)
-      const { LocalNotifications } = await import('@capacitor/local-notifications');
-      await ensureNotificationChannel(LocalNotifications);
-      const perm = await LocalNotifications.requestPermissions();
-      if (perm.display !== 'granted') return;
-      try { await LocalNotifications.cancel({ notifications: [{ id: NOTIF_ID }] }); } catch (_) {}
-      await LocalNotifications.schedule({
-        notifications: [{
-          id: NOTIF_ID,
-          title: '🟢 TukTrack — Em Serviço',
-          body: 'A partilhar localização em segundo plano. Toque para abrir.',
-          ongoing: true,
-          autoCancel: false,
-          channelId: 'tuktrack_foreground',
-          smallIcon: 'ic_stat_icon',
-          iconColor: '#F59E0B',
-          schedule: { at: new Date(Date.now() + 100) },
-        }],
-      });
-      console.log('[Notif] Web fallback notification shown');
-    } catch (e) {
-      console.warn('[Notif] Notification error:', e);
     }
   };
 
-  const cancelOnlineNotification = async () => {
-    try {
-      // Stop the native foreground service → removes notification immediately
-      const bridge = (window as any).AndroidBridge;
-      if (bridge && typeof bridge.stopForegroundTracking === 'function') {
-        bridge.stopForegroundTracking();
-        console.log('[Notif] Native foreground service stopped via bridge');
-        return;
-      }
-      // Fallback for web/PWA
-      const { LocalNotifications } = await import('@capacitor/local-notifications');
-      await LocalNotifications.cancel({ notifications: [{ id: NOTIF_ID }] });
-      console.log('[Notif] Web fallback notification cancelled');
-    } catch (e) { /* ignore */ }
-  };
-
-  // Send a push-style local notification when manager starts a shift
-  const sendShiftStartNotification = async (shiftData: any) => {
-    try {
-      const { LocalNotifications } = await import('@capacitor/local-notifications');
-      await ensureNotificationChannel(LocalNotifications);
-      const perm = await LocalNotifications.requestPermissions();
-      if (perm.display !== 'granted') return;
-      try { await LocalNotifications.cancel({ notifications: [{ id: SHIFT_NOTIF_ID }] }); } catch (_) {}
-      await LocalNotifications.schedule({
-        notifications: [
-          {
-            id: SHIFT_NOTIF_ID,
-            title: '🚦 Turno Iniciado pelo Gestor!',
-            body: 'O seu gestor iniciou um turno. Entre em serviço quando estiver pronto.',
-            ongoing: false,
-            autoCancel: true,
-            channelId: 'tuktrack_alerts',
-            smallIcon: 'ic_launcher_foreground',
-            iconColor: '#F59E0B',
-            schedule: { at: new Date(Date.now() + 200) },
-          },
-        ],
-      });
-      console.log('[Notif] Shift start notification sent');
-    } catch (e) {
-      console.warn('[Notif] Shift notification not available (web):', e);
+  const startLocationTracking = () => {
+    // Try Median background location plugin first (works in background too)
+    // If the plugin exists but is unlicensed/fails, fall through to watchPosition
+    if ((window as any).median?.backgroundLocation) {
+      const started = startBackgroundLocation();
+      if (started) return; // plugin is working — no need for watchPosition
+      // Plugin failed — fall through to watchPosition below
     }
-  };
 
-  const requestOverlayPermission = () => {
-    if (androidPerms.state.overlay) return;
-    setShowOverlayPermissionModal(true);
-  };
-
-  const requestBackgroundLocationPermission = () => {
-    if (androidPerms.state.backgroundLocation) return;
-    setShowBackgroundPermissionModal(true);
-  };
-
-  // Ref to always have current uid in background callback
-  const _uidRef = React.useRef<string | null>(null);
-
-  const startLocationTracking = async () => {
-    // Try Capacitor background geolocation first (works in background, shows notification)
-    const bgStarted = await startBackgroundLocation();
-    if (bgStarted) return;
-
-    // Fallback: watchPosition (works on web and when Capacitor not available)
+    // watchPosition fallback: works on web AND in APK when plugin is unavailable
+    // This keeps location updating as long as the screen is on
     if (locationWatchRef.current !== null) {
       navigator.geolocation.clearWatch(locationWatchRef.current);
       locationWatchRef.current = null;
@@ -794,20 +668,26 @@ export default function DriverDashboard() {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
 
+        // Always update map immediately
         setCurrentCoords({ lat, lng });
         setLocationStatus('active');
 
+        // Throttle Firestore writes to every 5 seconds
         const now = Date.now();
         if (now - lastUpdateRef.current < 5000) return;
         lastUpdateRef.current = now;
 
         try {
           await updateDoc(doc(db, 'users', user.uid), {
-            location: { lat, lng, updatedAt: new Date().toISOString() },
+            location: {
+              lat,
+              lng,
+              updatedAt: new Date().toISOString()
+            },
             currentLat: lat,
             currentLng: lng,
             locationAccuracy: pos.coords.accuracy,
-            lastUpdated: serverTimestamp(),
+            lastUpdated: serverTimestamp()
           });
         } catch (err) {
           console.error('[GPS] watchPosition Firestore write error:', err);
@@ -816,6 +696,7 @@ export default function DriverDashboard() {
       (err) => {
         console.error('[GPS] watchPosition error:', err);
         setLocationStatus('disabled');
+        // Retry after 5s only if still online — prevents restart loop
         if (locationWatchRef.current !== null) {
           setTimeout(() => {
             if (isOnlineRef.current) startLocationTracking();
@@ -877,17 +758,22 @@ export default function DriverDashboard() {
               },
               lastUpdated: serverTimestamp()
             });
-            // Start location tracking — Capacitor handles background automatically
+            // STEP 1: Start watchPosition FIRST — location works immediately
             startLocationTracking();
             setIsOnline(true);
             setLocationStatus('active');
-            // 1. Show persistent status-bar notification
-            showOnlineNotification();
-            // 2. Ask overlay permission (appear on top)
-            requestOverlayPermission();
-            // 3. Ask "Allow all the time" location (shown after overlay modal closes)
-            if (!androidPerms.state.backgroundLocation) {
-              setTimeout(() => requestBackgroundLocationPermission(), 1200);
+
+            // STEP 2: Request permissions sequentially AFTER tracking starts
+            // This way location always works even if driver skips permissions
+            if ((window as any).median) {
+              // Request "Appear on top" (overlay) permission
+              if (!overlayPermissionGranted.current) {
+                setTimeout(() => setShowOverlayPermissionModal(true), 800);
+              }
+              // Request background location permission (after overlay modal)
+              else if (!backgroundLocationGranted.current) {
+                setTimeout(() => setShowBackgroundPermissionModal(true), 800);
+              }
             }
           } catch (err) {
             console.error('Failed to update online status:', err);
@@ -954,7 +840,6 @@ export default function DriverDashboard() {
       lastUpdateRef.current = 0; // reset throttle — next go-online writes position immediately
       stopLocationTracking();
       stopBackgroundLocation();
-      cancelOnlineNotification();
       await updateDoc(doc(db, 'users', user.uid), {
         isOnline: false,
         status: 'offline',
@@ -1127,8 +1012,52 @@ export default function DriverDashboard() {
     }
   };
 
+  // ─── Listen for manager shift notifications ──────────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    const notifQuery = query(
+      collection(db, 'notifications'),
+      where('isForDrivers', '==', true),
+      where('read', '==', false),
+      orderBy('createdAt', 'desc'),
+      limit(1)
+    );
+    const unsub = onSnapshot(notifQuery, (snapshot) => {
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type === 'added') {
+          const notif = change.doc.data();
+          setShiftNotification({ title: notif.title || 'TukTrack', message: notif.message || '' });
+          setTimeout(() => setShiftNotification(null), 8000);
+          try { await updateDoc(doc(db, 'notifications', change.doc.id), { read: true }); } catch (e) {}
+        }
+      });
+    });
+    return () => unsub();
+  }, [user?.uid]);
+
   return (
-    <div className="flex flex-col space-y-8 pb-48 lg:pb-8 max-w-lg mx-auto">
+    <>
+      {/* ── Persistent Online Bar ── */}
+      {isOnline && (
+        <div style={{position:'fixed',top:0,left:0,right:0,zIndex:9999,background:'#16a34a',color:'white',textAlign:'center',padding:'8px',fontSize:'13px',fontWeight:'bold',display:'flex',alignItems:'center',justifyContent:'center',gap:'6px'}}>
+          <span style={{animation:'pulse 1s infinite'}}>●</span>
+          TukTrack — Online · GPS Ativo
+        </div>
+      )}
+      {/* ── Shift Notification Banner ── */}
+      {shiftNotification && (
+        <div
+          onClick={() => setShiftNotification(null)}
+          style={{position:'fixed',top:isOnline?36:0,left:0,right:0,zIndex:9998,background:'#f59e0b',color:'#0f172a',padding:'12px 16px',boxShadow:'0 4px 12px rgba(0,0,0,0.2)',cursor:'pointer',display:'flex',gap:'12px',alignItems:'flex-start'}}
+        >
+          <div style={{flex:1}}>
+            <p style={{fontWeight:900,fontSize:'14px',margin:0}}>{shiftNotification.title}</p>
+            <p style={{fontSize:'12px',margin:'4px 0 0',opacity:0.8}}>{shiftNotification.message}</p>
+          </div>
+          <span style={{fontSize:'18px',fontWeight:'bold',opacity:0.6}}>✕</span>
+        </div>
+      )}
+      <div className="flex flex-col space-y-8 pb-48 lg:pb-8 max-w-lg mx-auto" style={{marginTop: isOnline ? '36px' : '0'}}>
       {/* Notifications Section */}
       <AnimatePresence>
         {notifications.map((notif) => (
@@ -1727,26 +1656,161 @@ export default function DriverDashboard() {
         onRetry={handleGoOnline}
       />
 
-      <OverlayPermissionModal
-        isOpen={showOverlayPermissionModal}
-        onClose={() => setShowOverlayPermissionModal(false)}
-        onDone={() => {
-          setShowOverlayPermissionModal(false);
-          androidPerms.refresh();
-          if (!androidPerms.state.backgroundLocation) {
-            setTimeout(() => setShowBackgroundPermissionModal(true), 800);
-          }
-        }}
-      />
+      {/* Overlay Permission Modal — "Display over other apps" */}
+      <AnimatePresence>
+        {showOverlayPermissionModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[350] bg-navy/95 backdrop-blur-xl flex items-end justify-center p-6"
+          >
+            <motion.div
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              className="bg-navy border border-white/10 rounded-[2rem] p-8 w-full max-w-md shadow-2xl"
+            >
+              {/* Icon */}
+              <div className="w-20 h-20 bg-amber/10 rounded-[2rem] flex items-center justify-center mx-auto mb-5 border border-amber/20">
+                <div className="text-4xl">📱</div>
+              </div>
 
-      <BackgroundLocationModal
-        isOpen={showBackgroundPermissionModal}
-        onClose={() => setShowBackgroundPermissionModal(false)}
-        onDone={() => {
-          setShowBackgroundPermissionModal(false);
-          androidPerms.refresh();
-        }}
-      />
+              <div className="flex items-center justify-center space-x-2 mb-3">
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-amber">Permissão Necessária</span>
+              </div>
+
+              <h3 className="text-2xl font-black text-white text-center mb-4 leading-tight italic">
+                Manter App Visível
+              </h3>
+
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-5 mb-6">
+                <p className="text-slate-300 text-sm font-medium leading-relaxed mb-4">
+                  Para que o TukTrack continue a funcionar enquanto usa outras aplicações, precisamos da permissão <strong className="text-amber">"Superposição sobre outras apps"</strong>.
+                </p>
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-amber mb-2">No próximo ecrã:</p>
+                  <div className="flex items-start space-x-2">
+                    <span className="text-amber font-black text-sm">1.</span>
+                    <span className="text-slate-300 text-xs font-medium">Encontre <strong className="text-white">TukTrack</strong> na lista</span>
+                  </div>
+                  <div className="flex items-start space-x-2">
+                    <span className="text-amber font-black text-sm">2.</span>
+                    <span className="text-slate-300 text-xs font-medium">Toque em <strong className="text-white">TukTrack</strong></span>
+                  </div>
+                  <div className="flex items-start space-x-2">
+                    <span className="text-amber font-black text-sm">3.</span>
+                    <span className="text-slate-300 text-xs font-medium">Ative <strong className="text-amber">"Autorizar superposição"</strong></span>
+                  </div>
+                  <div className="flex items-start space-x-2">
+                    <span className="text-amber font-black text-sm">4.</span>
+                    <span className="text-slate-300 text-xs font-medium">Volte ao TukTrack e prima <strong className="text-white">GO!</strong></span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col space-y-3">
+                <button
+                  onClick={async () => {
+                    setShowOverlayPermissionModal(false);
+                    overlayPermissionGranted.current = true;
+                    localStorage.setItem('tuktrack_overlay_granted', 'true');
+                    // Request SYSTEM_ALERT_WINDOW permission
+                    if ((window as any).median?.permissions) {
+                      try {
+                        await (window as any).median.permissions.request({
+                          permission: 'android.permission.SYSTEM_ALERT_WINDOW'
+                        });
+                      } catch (e) {
+                        console.warn('Overlay permission request failed:', e);
+                      }
+                    }
+                    // tracking already running — now show background location modal
+                    if (!backgroundLocationGranted.current) {
+                      setTimeout(() => setShowBackgroundPermissionModal(true), 800);
+                    }
+                  }}
+                  className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm"
+                >
+                  Abrir Definições de Permissão
+                </button>
+                <button
+                  onClick={() => {
+                    setShowOverlayPermissionModal(false);
+                    overlayPermissionGranted.current = true;
+                    localStorage.setItem('tuktrack_overlay_granted', 'true');
+                    // tracking already running — show background location modal next
+                    if (!backgroundLocationGranted.current) {
+                      setTimeout(() => setShowBackgroundPermissionModal(true), 500);
+                    }
+                  }}
+                  className="w-full h-12 text-slate-400 font-bold text-sm hover:text-slate-200 transition-colors"
+                >
+                  Continuar sem esta permissão
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Background Location Permission Modal */}
+      <AnimatePresence>
+        {showBackgroundPermissionModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-sm flex items-end justify-center p-6"
+          >
+            <motion.div
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl"
+            >
+              <div className="w-16 h-16 bg-amber/10 rounded-full flex items-center justify-center mx-auto mb-5 text-amber">
+                <MapPin size={32} />
+              </div>
+              <h3 className="text-xl font-black text-navy text-center mb-2">Localização em Segundo Plano</h3>
+              <p className="text-sm text-slate-500 text-center font-medium mb-6 leading-relaxed">
+                Para partilhar a sua localização enquanto usa outras aplicações, o TukTrack precisa de acesso à localização em segundo plano.<br/><br/>
+                No próximo ecrã, selecione <strong>"Permitir sempre"</strong>.
+              </p>
+              <div className="flex flex-col space-y-3">
+                <button
+                  onClick={() => {
+                    setShowBackgroundPermissionModal(false);
+                    backgroundLocationGranted.current = true;
+                    localStorage.setItem('tuktrack_bg_location_granted', 'true');
+                    // Open Android app settings directly — works without any paid plugin
+                    // Driver manually sets Location → "Allow all the time" there
+                    if ((window as any).median?.share?.openBrowser) {
+                      (window as any).median.share.openBrowser({ url: 'package:' + 'co.median.android.bnead' });
+                    } else {
+                      // Fallback: show alert with manual instructions
+                      alert('Para ativar localizacao em segundo plano: Definicoes > Aplicacoes > TukTrack > Permissoes > Localizacao > Permitir sempre');
+                    }
+                  }}
+                  className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
+                >
+                  Permitir Localização em Segundo Plano
+                </button>
+                <button
+                  onClick={() => {
+                    setShowBackgroundPermissionModal(false);
+                    backgroundLocationGranted.current = true;
+                    localStorage.setItem('tuktrack_bg_location_granted', 'true');
+                  }}
+                  className="w-full h-12 text-slate-400 font-bold text-sm"
+                >
+                  Continuar sem segundo plano
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Shift Start Modal — prompts driver to go online */}
       <AnimatePresence>
@@ -1800,5 +1864,7 @@ export default function DriverDashboard() {
         </div>
       )}
     </div>
-  ); 
+      </div>
+    </>
+  );
 }
