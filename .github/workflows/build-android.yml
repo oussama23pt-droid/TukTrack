@@ -30,7 +30,7 @@ jobs:
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Install Android build tools
+      - name: Install Android platform
         run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       - name: Install dependencies
@@ -50,18 +50,13 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Create Gradle wrapper
-        run: |
-          cd android
-          gradle wrapper --gradle-version 8.4 --distribution-type all
-          chmod +x gradlew
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
 
       - name: Build Debug APK
         run: |
           cd android
           ./gradlew assembleDebug --stacktrace
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
