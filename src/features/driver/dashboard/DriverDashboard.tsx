@@ -725,13 +725,6 @@ export default function DriverDashboard() {
       return;
     }
 
-    // On Median mobile: request overlay permission first (if not already granted)
-    // This enables the app to display over other apps while driver is online
-    if ((window as any).median?.backgroundLocation && !overlayPermissionGranted.current) {
-      setShowOverlayPermissionModal(true);
-      return; // Modal will call handleGoOnline() again after permission
-    }
-
     setIsActionLoading(true);
     try {
       // Explicit permission query
@@ -764,18 +757,10 @@ export default function DriverDashboard() {
               },
               lastUpdated: serverTimestamp()
             });
-            // On Median mobile: show background location permission modal before tracking
-            if ((window as any).median?.backgroundLocation) {
-              if (!backgroundLocationGranted.current) {
-                // First time — show modal to explain and request permission
-                setShowBackgroundPermissionModal(true);
-              } else {
-                // Already granted — start directly, no modal
-                startLocationTracking();
-              }
-            } else {
-              startLocationTracking(); // web browser fallback
-            }
+            // Always start location tracking immediately — watchPosition works in APK too
+            // The background plugin is tried first inside startLocationTracking(),
+            // and falls back to watchPosition automatically if unavailable/unlicensed
+            startLocationTracking();
             setIsOnline(true);
             setLocationStatus('active');
           } catch (err) {
