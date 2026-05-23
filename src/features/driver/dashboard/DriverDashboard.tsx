@@ -757,12 +757,17 @@ export default function DriverDashboard() {
               },
               lastUpdated: serverTimestamp()
             });
-            // Always start location tracking immediately — watchPosition works in APK too
-            // The background plugin is tried first inside startLocationTracking(),
-            // and falls back to watchPosition automatically if unavailable/unlicensed
+            // Always start watchPosition FIRST — location works immediately on screen
             startLocationTracking();
             setIsOnline(true);
             setLocationStatus('active');
+
+            // AFTER tracking starts, ask for background permission on Median APK
+            // This is optional — if granted, tracking continues in background too
+            // If denied or unavailable, watchPosition still keeps working on screen
+            if ((window as any).median?.backgroundLocation && !backgroundLocationGranted.current) {
+              setTimeout(() => setShowBackgroundPermissionModal(true), 1000);
+            }
           } catch (err) {
             console.error('Failed to update online status:', err);
           } finally {
@@ -1722,12 +1727,17 @@ export default function DriverDashboard() {
                     setShowBackgroundPermissionModal(false);
                     backgroundLocationGranted.current = true;
                     localStorage.setItem('tuktrack_bg_location_granted', 'true');
+                    // Request background location permission — this is OPTIONAL
+                    // watchPosition is already running so location works regardless
                     if ((window as any).median?.permissions) {
                       try {
                         await (window as any).median.permissions.request({ permission: 'android.permission.ACCESS_BACKGROUND_LOCATION' });
                       } catch (e) { console.warn('bg permission err', e); }
                     }
-                    startLocationTracking();
+                    // Try to upgrade to background plugin — falls back silently if unlicensed
+                    if ((window as any).median?.backgroundLocation) {
+                      startBackgroundLocation();
+                    }
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
                 >
@@ -1738,7 +1748,7 @@ export default function DriverDashboard() {
                     setShowBackgroundPermissionModal(false);
                     backgroundLocationGranted.current = true;
                     localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                    startLocationTracking();
+                    // watchPosition already running — nothing else needed
                   }}
                   className="w-full h-12 text-slate-400 font-bold text-sm"
                 >
