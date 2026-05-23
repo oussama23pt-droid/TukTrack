@@ -702,7 +702,7 @@ export default function DriverDashboard() {
             ongoing: true,       // sticky — cannot be swiped away by driver
             autoCancel: false,
             channelId: 'tuktrack_foreground',
-            smallIcon: 'ic_launcher_foreground',
+            smallIcon: 'ic_stat_icon',
             iconColor: '#F59E0B',
             schedule: { at: new Date(Date.now() + 100) },
           },
@@ -739,7 +739,7 @@ export default function DriverDashboard() {
             ongoing: false,
             autoCancel: true,
             channelId: 'tuktrack_alerts',
-            smallIcon: 'ic_launcher_foreground',
+            smallIcon: 'ic_stat_icon',
             iconColor: '#F59E0B',
             schedule: { at: new Date(Date.now() + 200) },
           },
