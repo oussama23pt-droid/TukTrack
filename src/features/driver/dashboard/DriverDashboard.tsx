@@ -77,8 +77,6 @@ export default function DriverDashboard() {
   const gpsWarningSentRef = React.useRef<boolean>(false);
   const [showBackgroundPermissionModal, setShowBackgroundPermissionModal] = useState(false);
   const [showOverlayPermissionModal, setShowOverlayPermissionModal] = useState(false);
-  const overlayPermissionGranted = React.useRef<boolean>(localStorage.getItem('tuktrack_overlay_granted') === 'true');
-  const backgroundLocationGranted = React.useRef<boolean>(localStorage.getItem('tuktrack_bg_location_granted') === 'true');
   const [showShiftStartModal, setShowShiftStartModal] = useState(false);
   const prevActiveShiftRef = React.useRef<any>(null);
 
