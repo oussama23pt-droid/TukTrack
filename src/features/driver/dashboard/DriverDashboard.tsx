@@ -436,6 +436,7 @@ export default function DriverDashboard() {
         // Only show the modal when shift STARTS (transitions from no shift to active shift)
         if (!prevActiveShiftRef.current) {
           setShowShiftStartModal(true);
+          sendShiftStartNotification(shiftData);
         }
         prevActiveShiftRef.current = shiftData;
         setActiveShift(shiftData);
@@ -645,31 +646,69 @@ export default function DriverDashboard() {
   };
 
   // ─── PERSISTENT FOREGROUND NOTIFICATION ──────────────────────────────────────
-  // Shows a sticky "TukTrack — Online" notification in the Android status bar
-  // while the driver is online. This keeps the app alive as a foreground service.
+  // Shows a sticky "TukTrack — Online" notification in the Android status bar.
+  // Uses @capacitor/local-notifications — gracefully ignored on web.
   const NOTIF_ID = 9001;
+  const SHIFT_NOTIF_ID = 9002;
+
+  const ensureNotificationChannel = async (LocalNotifications: any) => {
+    try {
+      await LocalNotifications.createChannel({
+        id: 'tuktrack_foreground',
+        name: 'TukTrack Serviço Ativo',
+        description: 'Notificação persistente enquanto o motorista está online',
+        importance: 4, // HIGH
+        visibility: 1, // PUBLIC — shows on lock screen
+        sound: null,
+        vibration: false,
+        lights: false,
+      });
+      await LocalNotifications.createChannel({
+        id: 'tuktrack_alerts',
+        name: 'TukTrack Alertas',
+        description: 'Alertas de turno e eventos importantes',
+        importance: 5, // MAX
+        visibility: 1,
+        sound: 'default',
+        vibration: true,
+        lights: true,
+      });
+    } catch (e) {
+      // Channel may already exist — safe to ignore
+    }
+  };
 
   const showOnlineNotification = async () => {
     try {
       const { LocalNotifications } = await import('@capacitor/local-notifications');
+      // Ensure channels exist before scheduling
+      await ensureNotificationChannel(LocalNotifications);
+      // Request POST_NOTIFICATIONS permission (Android 13+)
       const perm = await LocalNotifications.requestPermissions();
-      if (perm.display !== 'granted') return;
+      if (perm.display !== 'granted') {
+        console.warn('[Notif] Notification permission denied');
+        return;
+      }
+      // Cancel any existing online notification first to avoid duplicates
+      try { await LocalNotifications.cancel({ notifications: [{ id: NOTIF_ID }] }); } catch (_) {}
       await LocalNotifications.schedule({
         notifications: [
           {
             id: NOTIF_ID,
-            title: 'TukTrack — Online 🟢',
-            body: 'A partilhar localização. Toque para abrir.',
-            ongoing: true,
+            title: '🟢 TukTrack — Em Serviço',
+            body: 'A partilhar localização em segundo plano. Toque para abrir.',
+            ongoing: true,       // sticky — cannot be swiped away by driver
             autoCancel: false,
-            smallIcon: 'ic_launcher_foreground',
             channelId: 'tuktrack_foreground',
+            smallIcon: 'ic_launcher_foreground',
+            iconColor: '#F59E0B',
+            schedule: { at: new Date(Date.now() + 100) },
           },
         ],
       });
-      console.log('[Notif] Foreground notification shown');
+      console.log('[Notif] Online notification shown');
     } catch (e) {
-      console.warn('[Notif] LocalNotifications not available:', e);
+      console.warn('[Notif] LocalNotifications not available (web):', e);
     }
   };
 
@@ -677,22 +716,66 @@ export default function DriverDashboard() {
     try {
       const { LocalNotifications } = await import('@capacitor/local-notifications');
       await LocalNotifications.cancel({ notifications: [{ id: NOTIF_ID }] });
-      console.log('[Notif] Foreground notification cancelled');
+      console.log('[Notif] Online notification cancelled');
+    } catch (e) { /* web — ignore */ }
+  };
+
+  // Send a push-style local notification when manager starts a shift
+  const sendShiftStartNotification = async (shiftData: any) => {
+    try {
+      const { LocalNotifications } = await import('@capacitor/local-notifications');
+      await ensureNotificationChannel(LocalNotifications);
+      const perm = await LocalNotifications.requestPermissions();
+      if (perm.display !== 'granted') return;
+      try { await LocalNotifications.cancel({ notifications: [{ id: SHIFT_NOTIF_ID }] }); } catch (_) {}
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id: SHIFT_NOTIF_ID,
+            title: '🚦 Turno Iniciado pelo Gestor!',
+            body: 'O seu gestor iniciou um turno. Entre em serviço quando estiver pronto.',
+            ongoing: false,
+            autoCancel: true,
+            channelId: 'tuktrack_alerts',
+            smallIcon: 'ic_launcher_foreground',
+            iconColor: '#F59E0B',
+            schedule: { at: new Date(Date.now() + 200) },
+          },
+        ],
+      });
+      console.log('[Notif] Shift start notification sent');
     } catch (e) {
-      // Not available on web — ignore
+      console.warn('[Notif] Shift notification not available (web):', e);
     }
   };
 
   // ─── OVERLAY ("Display over other apps") PERMISSION ──────────────────────────
-  const requestOverlayPermission = async () => {
-    if (overlayPermissionGranted.current) return;
+  // Opens Android Settings → Apps → TukTrack → Display over other apps
+  const openOverlaySettings = async () => {
     try {
-      if ((window as any).Capacitor?.isNativePlatform?.()) {
-        setShowOverlayPermissionModal(true);
-        return;
-      }
-    } catch (e) { /* web — skip */ }
-    overlayPermissionGranted.current = true;
+      // Use Capacitor App plugin to open the system overlay settings screen
+      const { App } = await import('@capacitor/app');
+      // ACTION_MANAGE_OVERLAY_PERMISSION opens directly to the overlay toggle
+      await (App as any).openUrl({
+        url: 'package:com.tuktrack.app'
+      });
+    } catch (e) {
+      // Fallback: alert with manual instructions
+      alert('Vá a: Definições > Aplicações > TukTrack > Permissões especiais > Aparecer por cima de outras apps → Ativar');
+    }
+  };
+
+  const requestOverlayPermission = () => {
+    if (overlayPermissionGranted.current) return;
+    // Show the overlay permission modal — works on APK and web (web just skips)
+    setShowOverlayPermissionModal(true);
+  };
+
+  // ─── "ALLOW ALL THE TIME" LOCATION PERMISSION ────────────────────────────────
+  // Opens Android Settings for the app so user can change location to "Allow all the time"
+  const requestBackgroundLocationPermission = () => {
+    if (backgroundLocationGranted.current) return;
+    setTimeout(() => setShowBackgroundPermissionModal(true), 600);
   };
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -806,9 +889,14 @@ export default function DriverDashboard() {
             startLocationTracking();
             setIsOnline(true);
             setLocationStatus('active');
-            // Show persistent status-bar notification and request overlay permission
+            // 1. Show persistent status-bar notification
             showOnlineNotification();
+            // 2. Ask overlay permission (appear on top)
             requestOverlayPermission();
+            // 3. Ask "Allow all the time" location (shown after overlay modal closes)
+            if (!backgroundLocationGranted.current) {
+              setTimeout(() => requestBackgroundLocationPermission(), 1200);
+            }
           } catch (err) {
             console.error('Failed to update online status:', err);
           } finally {
@@ -1706,19 +1794,11 @@ export default function DriverDashboard() {
                     setShowOverlayPermissionModal(false);
                     overlayPermissionGranted.current = true;
                     localStorage.setItem('tuktrack_overlay_granted', 'true');
-                    // Request SYSTEM_ALERT_WINDOW permission
-                    if ((window as any).median?.permissions) {
-                      try {
-                        await (window as any).median.permissions.request({
-                          permission: 'android.permission.SYSTEM_ALERT_WINDOW'
-                        });
-                      } catch (e) {
-                        console.warn('Overlay permission request failed:', e);
-                      }
-                    }
-                    // tracking already running — now show background location modal
+                    // Open Android system settings for overlay permission
+                    await openOverlaySettings();
+                    // After returning from settings, show background location modal
                     if (!backgroundLocationGranted.current) {
-                      setTimeout(() => setShowBackgroundPermissionModal(true), 800);
+                      setTimeout(() => setShowBackgroundPermissionModal(true), 1000);
                     }
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm"
@@ -1770,17 +1850,17 @@ export default function DriverDashboard() {
               </p>
               <div className="flex flex-col space-y-3">
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     setShowBackgroundPermissionModal(false);
                     backgroundLocationGranted.current = true;
                     localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                    // Open Android app settings directly — works without any paid plugin
-                    // Driver manually sets Location → "Allow all the time" there
-                    if ((window as any).median?.share?.openBrowser) {
-                      (window as any).median.share.openBrowser({ url: 'package:' + 'co.median.android.bnead' });
-                    } else {
-                      // Fallback: show alert with manual instructions
-                      alert('Para ativar localizacao em segundo plano: Definicoes > Aplicacoes > TukTrack > Permissoes > Localizacao > Permitir sempre');
+                    // Open Android App Settings → Permissions → Location
+                    // Driver changes to "Allow all the time" manually
+                    try {
+                      const { App } = await import('@capacitor/app');
+                      await (App as any).openUrl({ url: 'package:com.tuktrack.app' });
+                    } catch (e) {
+                      alert('Vá a: Definições > Aplicações > TukTrack > Permissões > Localização > Permitir sempre');
                     }
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
