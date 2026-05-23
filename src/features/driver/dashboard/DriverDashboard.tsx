@@ -56,9 +56,13 @@ export default function DriverDashboard() {
   const gpsWarningSentRef = React.useRef<boolean>(false);
   const [showBackgroundPermissionModal, setShowBackgroundPermissionModal] = useState(false);
   const [showOverlayPermissionModal, setShowOverlayPermissionModal] = useState(false);
-  const overlayPermissionGranted = React.useRef<boolean>(false);
+  const overlayPermissionGranted = React.useRef<boolean>(localStorage.getItem('tuktrack_overlay_granted') === 'true');
   const [showShiftStartModal, setShowShiftStartModal] = useState(false);
   const prevActiveShiftRef = React.useRef<any>(null);
+  // Set window flag immediately on mount so Median location callback is not blocked on first fire
+  if (typeof window !== 'undefined') {
+    (window as any)._tuktrack_isOnline = userData?.isOnline || false;
+  }
 
   // Fetch manager info
   useEffect(() => {
@@ -254,7 +258,7 @@ export default function DriverDashboard() {
       // Guard: do not write location if driver is offline
       if (!(window as any)._tuktrack_isOnline) return;
       const now = Date.now();
-      if (now - lastUpdateRef.current < 8000) {
+      if (now - lastUpdateRef.current < 4000) {
         setCurrentCoords({ lat: location.latitude, lng: location.longitude });
         return;
       }
@@ -607,7 +611,7 @@ export default function DriverDashboard() {
       async (pos) => {
         if (!user) return;
         const now = Date.now();
-        if (now - lastUpdateRef.current < 10000) {
+        if (now - lastUpdateRef.current < 5000) {
           setCurrentCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
           return;
         }
@@ -769,6 +773,7 @@ export default function DriverDashboard() {
     setIsActionLoading(true);
     try {
       (window as any)._tuktrack_isOnline = false; // stop Median callback writes immediately
+      lastUpdateRef.current = 0; // reset throttle — next go-online writes position immediately
       stopLocationTracking();
       stopBackgroundLocation();
       await updateDoc(doc(db, 'users', user.uid), {
@@ -1601,6 +1606,7 @@ export default function DriverDashboard() {
                   onClick={async () => {
                     setShowOverlayPermissionModal(false);
                     overlayPermissionGranted.current = true;
+                    localStorage.setItem('tuktrack_overlay_granted', 'true');
                     // Request SYSTEM_ALERT_WINDOW — opens Android settings for this permission
                     if ((window as any).median?.permissions) {
                       try {
@@ -1622,6 +1628,7 @@ export default function DriverDashboard() {
                   onClick={() => {
                     setShowOverlayPermissionModal(false);
                     overlayPermissionGranted.current = true; // skip next time
+                    localStorage.setItem('tuktrack_overlay_granted', 'true');
                     handleGoOnline(); // proceed without overlay
                   }}
                   className="w-full h-12 text-slate-400 font-bold text-sm hover:text-slate-200 transition-colors"
