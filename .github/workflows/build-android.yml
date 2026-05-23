@@ -50,6 +50,37 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
+      - name: Create missing mipmap icon folders
+        run: |
+          pip install pillow --quiet
+          python3 - <<'PYEOF'
+          from PIL import Image, ImageDraw
+          import os
+
+          sizes = {
+            "mipmap-mdpi":    48,
+            "mipmap-hdpi":    72,
+            "mipmap-xhdpi":   96,
+            "mipmap-xxhdpi":  144,
+            "mipmap-xxxhdpi": 192,
+          }
+
+          base = "android/app/src/main/res"
+
+          for folder, size in sizes.items():
+            path = os.path.join(base, folder)
+            os.makedirs(path, exist_ok=True)
+
+            # Draw a simple blue circle icon
+            img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            draw.ellipse([0, 0, size, size], fill=(37, 99, 235, 255))
+
+            img.save(os.path.join(path, "ic_launcher.png"))
+            img.save(os.path.join(path, "ic_launcher_round.png"))
+            print(f"Created {folder}/ic_launcher.png ({size}x{size})")
+          PYEOF
+
       - name: Install Gradle and generate wrapper
         run: |
           curl -fL -o /tmp/gradle-8.4-bin.zip \
