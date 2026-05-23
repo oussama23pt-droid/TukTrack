@@ -79,6 +79,7 @@ export default function DriverDashboard() {
   const [showOverlayPermissionModal, setShowOverlayPermissionModal] = useState(false);
   const [showShiftStartModal, setShowShiftStartModal] = useState(false);
   const prevActiveShiftRef = React.useRef<any>(null);
+  const androidPerms = useAndroidPermissions();
 
 
   // Fetch manager info
