@@ -1734,20 +1734,22 @@ export default function DriverDashboard() {
               </p>
               <div className="flex flex-col space-y-3">
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     setShowBackgroundPermissionModal(false);
                     backgroundLocationGranted.current = true;
                     localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                    // Request background location permission — this is OPTIONAL
-                    // watchPosition is already running so location works regardless
-                    if ((window as any).median?.permissions) {
-                      try {
-                        await (window as any).median.permissions.request({ permission: 'android.permission.ACCESS_BACKGROUND_LOCATION' });
-                      } catch (e) { console.warn('bg permission err', e); }
-                    }
-                    // Try to upgrade to background plugin — falls back silently if unlicensed
-                    if ((window as any).median?.backgroundLocation) {
-                      startBackgroundLocation();
+                    // Open Android app settings directly — works without any paid plugin
+                    // Driver manually sets Location → "Allow all the time" there
+                    if ((window as any).median?.share?.openBrowser) {
+                      (window as any).median.share.openBrowser({ url: 'package:' + 'co.median.android.bnead' });
+                    } else {
+                      // Fallback: show alert with manual instructions
+                      alert('Para ativar a localização em segundo plano:
+
+1. Abra as Definições do telemóvel
+2. Aplicações → TukTrack
+3. Permissões → Localização
+4. Selecione "Permitir sempre"');
                     }
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
@@ -1759,7 +1761,6 @@ export default function DriverDashboard() {
                     setShowBackgroundPermissionModal(false);
                     backgroundLocationGranted.current = true;
                     localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                    // watchPosition already running — nothing else needed
                   }}
                   className="w-full h-12 text-slate-400 font-bold text-sm"
                 >
