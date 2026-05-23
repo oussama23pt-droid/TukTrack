@@ -1,0 +1,3 @@
+-keep class com.tuktrack.app.** { *; }
+-keep class com.getcapacitor.** { *; }
+-keep class com.transistorsoft.** { *; }

@@ -1,0 +1,18 @@
+<resources>
+<!--  Base application theme  -->
+<style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
+<item name="colorPrimary">#F59E0B</item>
+<item name="colorPrimaryDark">#D97706</item>
+<item name="colorAccent">#F59E0B</item>
+<item name="android:windowBackground">@android:color/white</item>
+</style>
+<style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+<item name="android:background">@android:color/white</item>
+</style>
+<style name="AppTheme.NoActionBar" parent="AppTheme">
+<item name="windowActionBar">false</item>
+<item name="windowNoTitle">true</item>
+</style>
+<style name="AppTheme.AppBarOverlay" parent="ThemeOverlay.AppCompat.Dark.ActionBar"/>
+<style name="AppTheme.PopupOverlay" parent="ThemeOverlay.AppCompat.Light"/>
+</resources>
