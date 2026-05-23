@@ -176,14 +176,15 @@ export default function DriverDashboard() {
   };
 
   useEffect(() => {
-    if (showMap && currentCoords && !isNaN(currentCoords.lat)) {
+    if (currentCoords && !isNaN(currentCoords.lat)) {
+      // Always follow the driver on the map when coords update
       setMapViewState(prev => ({
         ...prev,
         latitude: currentCoords.lat,
         longitude: currentCoords.lng
       }));
     }
-  }, [showMap, currentCoords]);
+  }, [currentCoords]);
 
   // currentCoords is updated by startLocationTracking watchPosition - no duplicate needed
 
@@ -247,12 +248,17 @@ export default function DriverDashboard() {
     };
   }, [isOnline]);
 
-  // Keep an always-current ref of isOnline so the Median callback (which closes over stale values) can check it
-  const isOnlineRef = React.useRef<boolean>(userData?.isOnline || false);
+  // Keep an always-current ref of isOnline — initialized from userData AND kept in sync
+  // This is critical: the Median callback runs in a stale closure and cannot read React state
+  const isOnlineRef = React.useRef<boolean>(isOnline);
   useEffect(() => {
     isOnlineRef.current = isOnline;
     (window as any)._tuktrack_isOnline = isOnline;
   }, [isOnline]);
+
+  // coordsRef: written directly by Median callback to avoid stale closure issues in Android WebView
+  const coordsRef = React.useRef<{lat: number, lng: number} | null>(null);
+  const [coordsVersion, setCoordsVersion] = React.useState(0);
 
   // Median background location callback — receives GPS updates even when app is minimized
   useEffect(() => {
@@ -262,25 +268,26 @@ export default function DriverDashboard() {
       if (!location?.latitude || !location?.longitude) return;
       // Guard: do not write location if driver is offline — use ref for reliable current value
       if (!isOnlineRef.current) return;
+
+      const lat = location.latitude;
+      const lng = location.longitude;
+
+      // Always update the ref and trigger re-render — even if throttled for Firestore
+      coordsRef.current = { lat, lng };
+      setCoordsVersion(v => v + 1); // force map marker to re-render
+
       const now = Date.now();
-      if (now - lastUpdateRef.current < 4000) {
-        setCurrentCoords({ lat: location.latitude, lng: location.longitude });
-        return;
-      }
+      if (now - lastUpdateRef.current < 4000) return; // throttle only Firestore writes
       lastUpdateRef.current = now;
+
       try {
         await updateDoc(doc(db, 'users', user.uid), {
-          location: {
-            lat: location.latitude,
-            lng: location.longitude,
-            updatedAt: new Date().toISOString()
-          },
-          currentLat: location.latitude,
-          currentLng: location.longitude,
+          location: { lat, lng, updatedAt: new Date().toISOString() },
+          currentLat: lat,
+          currentLng: lng,
           locationAccuracy: location.accuracy ?? null,
           lastUpdated: serverTimestamp()
         });
-        setCurrentCoords({ lat: location.latitude, lng: location.longitude });
         setLocationStatus('active');
       } catch (err) {
         console.error('[Median] location save error:', err);
@@ -291,6 +298,14 @@ export default function DriverDashboard() {
       delete (window as any).medianLocationUpdated;
     };
   }, [user]);
+
+  // Sync coordsRef into currentCoords state so the map marker moves
+  // This runs on the React side safely, avoiding the stale closure problem
+  useEffect(() => {
+    if (coordsRef.current) {
+      setCurrentCoords(coordsRef.current);
+    }
+  }, [coordsVersion]);
 
   // Monitor GPS status and notify manager if disabled while online
   useEffect(() => {
