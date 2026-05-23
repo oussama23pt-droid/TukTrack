@@ -256,56 +256,72 @@ export default function DriverDashboard() {
     (window as any)._tuktrack_isOnline = isOnline;
   }, [isOnline]);
 
-  // coordsRef: written directly by Median callback to avoid stale closure issues in Android WebView
-  const coordsRef = React.useRef<{lat: number, lng: number} | null>(null);
-  const [coordsVersion, setCoordsVersion] = React.useState(0);
+  // --- MEDIAN LOCATION CALLBACK ARCHITECTURE ---
+  // The callback is registered ONCE on window at module level (outside React lifecycle)
+  // so Android WebView never loses it when React re-renders or cleans up effects.
+  // We use only refs inside the callback — no React state setters — to avoid stale closure issues.
+  // A setInterval polls the ref every 2 seconds and pushes coords into React state safely.
 
-  // Median background location callback — receives GPS updates even when app is minimized
+  const coordsRef = React.useRef<{lat: number, lng: number} | null>(null);
+  const userUidRef = React.useRef<string | null>(null);
+  const firestoreLastWriteRef = React.useRef<number>(0);
+
+  // Keep userUidRef current so the module-level callback can access it
   useEffect(() => {
-    if (!user) return;
+    userUidRef.current = user?.uid || null;
+  }, [user?.uid]);
+
+  // Register the callback once — never delete it
+  useEffect(() => {
+    if ((window as any).__tuktrack_median_registered) return; // already registered
+    (window as any).__tuktrack_median_registered = true;
 
     (window as any).medianLocationUpdated = async (location: any) => {
       if (!location?.latitude || !location?.longitude) return;
-      // Guard: do not write location if driver is offline — use ref for reliable current value
-      if (!isOnlineRef.current) return;
+      if (!(window as any)._tuktrack_isOnline) return; // offline guard via window flag
 
       const lat = location.latitude;
       const lng = location.longitude;
+      const uid = (window as any)._tuktrack_uid;
 
-      // Always update the ref and trigger re-render — even if throttled for Firestore
-      coordsRef.current = { lat, lng };
-      setCoordsVersion(v => v + 1); // force map marker to re-render
+      // Write to ref — the interval below picks this up and updates React state
+      (window as any)._tuktrack_latest_coords = { lat, lng };
 
+      // Throttle Firestore writes to every 4 seconds
       const now = Date.now();
-      if (now - lastUpdateRef.current < 4000) return; // throttle only Firestore writes
-      lastUpdateRef.current = now;
+      if (!uid || now - firestoreLastWriteRef.current < 4000) return;
+      firestoreLastWriteRef.current = now;
 
       try {
-        await updateDoc(doc(db, 'users', user.uid), {
+        await updateDoc(doc(db, 'users', uid), {
           location: { lat, lng, updatedAt: new Date().toISOString() },
           currentLat: lat,
           currentLng: lng,
           locationAccuracy: location.accuracy ?? null,
           lastUpdated: serverTimestamp()
         });
-        setLocationStatus('active');
       } catch (err) {
         console.error('[Median] location save error:', err);
       }
     };
+  }, []); // empty deps — register once only, never re-run
 
-    return () => {
-      delete (window as any).medianLocationUpdated;
-    };
-  }, [user]);
-
-  // Sync coordsRef into currentCoords state so the map marker moves
-  // This runs on the React side safely, avoiding the stale closure problem
+  // Keep window flags in sync with React state
   useEffect(() => {
-    if (coordsRef.current) {
-      setCurrentCoords(coordsRef.current);
-    }
-  }, [coordsVersion]);
+    (window as any)._tuktrack_uid = user?.uid || null;
+  }, [user?.uid]);
+
+  // Poll the window coords every 2s and push into React state — safe from stale closures
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const latest = (window as any)._tuktrack_latest_coords;
+      if (latest && isOnlineRef.current) {
+        setCurrentCoords({ lat: latest.lat, lng: latest.lng });
+        setLocationStatus('active');
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Monitor GPS status and notify manager if disabled while online
   useEffect(() => {
@@ -798,6 +814,7 @@ export default function DriverDashboard() {
     setIsActionLoading(true);
     try {
       (window as any)._tuktrack_isOnline = false; // stop Median callback writes immediately
+      (window as any)._tuktrack_latest_coords = null; // clear stale coords
       lastUpdateRef.current = 0; // reset throttle — next go-online writes position immediately
       stopLocationTracking();
       stopBackgroundLocation();
