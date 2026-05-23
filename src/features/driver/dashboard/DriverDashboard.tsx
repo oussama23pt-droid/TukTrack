@@ -57,12 +57,10 @@ export default function DriverDashboard() {
   const [showBackgroundPermissionModal, setShowBackgroundPermissionModal] = useState(false);
   const [showOverlayPermissionModal, setShowOverlayPermissionModal] = useState(false);
   const overlayPermissionGranted = React.useRef<boolean>(localStorage.getItem('tuktrack_overlay_granted') === 'true');
+  const backgroundLocationGranted = React.useRef<boolean>(localStorage.getItem('tuktrack_bg_location_granted') === 'true');
   const [showShiftStartModal, setShowShiftStartModal] = useState(false);
   const prevActiveShiftRef = React.useRef<any>(null);
-  // Set window flag immediately on mount so Median location callback is not blocked on first fire
-  if (typeof window !== 'undefined') {
-    (window as any)._tuktrack_isOnline = userData?.isOnline || false;
-  }
+
 
   // Fetch manager info
   useEffect(() => {
@@ -249,14 +247,21 @@ export default function DriverDashboard() {
     };
   }, [isOnline]);
 
+  // Keep an always-current ref of isOnline so the Median callback (which closes over stale values) can check it
+  const isOnlineRef = React.useRef<boolean>(userData?.isOnline || false);
+  useEffect(() => {
+    isOnlineRef.current = isOnline;
+    (window as any)._tuktrack_isOnline = isOnline;
+  }, [isOnline]);
+
   // Median background location callback — receives GPS updates even when app is minimized
   useEffect(() => {
     if (!user) return;
 
     (window as any).medianLocationUpdated = async (location: any) => {
       if (!location?.latitude || !location?.longitude) return;
-      // Guard: do not write location if driver is offline
-      if (!(window as any)._tuktrack_isOnline) return;
+      // Guard: do not write location if driver is offline — use ref for reliable current value
+      if (!isOnlineRef.current) return;
       const now = Date.now();
       if (now - lastUpdateRef.current < 4000) {
         setCurrentCoords({ lat: location.latitude, lng: location.longitude });
@@ -579,8 +584,8 @@ export default function DriverDashboard() {
     (window as any).median.backgroundLocation.start({
       callback: 'medianLocationUpdated',
       androidPriority: 'highAccuracy',
-      androidInterval: 10000,
-      androidFastestInterval: 5000,
+      androidInterval: 5000,
+      androidFastestInterval: 3000,
       iosDesiredAccuracy: 'best',
       iosDistanceFilter: 10,
       androidNotificationTitle: '🟢 TukTrack — Online',
@@ -705,8 +710,13 @@ export default function DriverDashboard() {
             });
             // On Median mobile: show background location permission modal before tracking
             if ((window as any).median?.backgroundLocation) {
-              setShowBackgroundPermissionModal(true);
-              // Modal will call startLocationTracking() after user interaction
+              if (!backgroundLocationGranted.current) {
+                // First time — show modal to explain and request permission
+                setShowBackgroundPermissionModal(true);
+              } else {
+                // Already granted — start directly, no modal
+                startLocationTracking();
+              }
             } else {
               startLocationTracking(); // web browser fallback
             }
@@ -1668,6 +1678,8 @@ export default function DriverDashboard() {
                 <button
                   onClick={async () => {
                     setShowBackgroundPermissionModal(false);
+                    backgroundLocationGranted.current = true;
+                    localStorage.setItem('tuktrack_bg_location_granted', 'true');
                     if ((window as any).median?.permissions) {
                       try {
                         await (window as any).median.permissions.request({ permission: 'android.permission.ACCESS_BACKGROUND_LOCATION' });
@@ -1682,6 +1694,8 @@ export default function DriverDashboard() {
                 <button
                   onClick={() => {
                     setShowBackgroundPermissionModal(false);
+                    backgroundLocationGranted.current = true;
+                    localStorage.setItem('tuktrack_bg_location_granted', 'true');
                     startLocationTracking();
                   }}
                   className="w-full h-12 text-slate-400 font-bold text-sm"
