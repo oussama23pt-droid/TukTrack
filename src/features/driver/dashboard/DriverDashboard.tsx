@@ -682,16 +682,16 @@ export default function DriverDashboard() {
 
   const showOnlineNotification = async () => {
     try {
-      // Use the native Android Foreground Service via the JS bridge.
-      // This is the ONLY reliable way to show a persistent, non-dismissable
-      // notification and keep the app alive in the background on Android.
+      // PRIMARY: Use native Android Foreground Service via the JS bridge.
+      // This is the ONLY way to get a persistent non-dismissable notification
+      // and keep the app process alive when the driver leaves the app.
       const bridge = (window as any).AndroidBridge;
       if (bridge && typeof bridge.startForegroundTracking === 'function') {
         bridge.startForegroundTracking();
-        console.log('[Notif] Native foreground service started');
+        console.log('[Notif] Native foreground service started via bridge');
         return;
       }
-      // Fallback for web/PWA: use LocalNotifications (best effort, not sticky)
+      // FALLBACK for web/PWA (bridge not available)
       const { LocalNotifications } = await import('@capacitor/local-notifications');
       await ensureNotificationChannel(LocalNotifications);
       const perm = await LocalNotifications.requestPermissions();
@@ -712,17 +712,17 @@ export default function DriverDashboard() {
       });
       console.log('[Notif] Web fallback notification shown');
     } catch (e) {
-      console.warn('[Notif] Notification failed:', e);
+      console.warn('[Notif] Notification error:', e);
     }
   };
 
   const cancelOnlineNotification = async () => {
     try {
-      // Stop the native foreground service — removes notification immediately
+      // Stop the native foreground service → removes notification immediately
       const bridge = (window as any).AndroidBridge;
       if (bridge && typeof bridge.stopForegroundTracking === 'function') {
         bridge.stopForegroundTracking();
-        console.log('[Notif] Native foreground service stopped');
+        console.log('[Notif] Native foreground service stopped via bridge');
         return;
       }
       // Fallback for web/PWA
