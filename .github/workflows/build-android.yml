@@ -1,4 +1,4 @@
-name: Build Android APK & AAB
+name: Build Android APK
 
 on:
   push:
@@ -27,6 +27,12 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install Android build tools
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
       - name: Install dependencies
         run: npm install
 
@@ -44,19 +50,18 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Generate Gradle wrapper if missing
+      - name: Create Gradle wrapper
         run: |
-          if [ ! -f android/gradlew ]; then
-            cd android
-            gradle wrapper --gradle-version 8.4
-            cd ..
-          fi
-          chmod +x android/gradlew
+          cd android
+          gradle wrapper --gradle-version 8.4 --distribution-type all
+          chmod +x gradlew
 
       - name: Build Debug APK
         run: |
           cd android
           ./gradlew assembleDebug --stacktrace
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
