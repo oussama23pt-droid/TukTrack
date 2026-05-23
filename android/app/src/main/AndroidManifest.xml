@@ -6,16 +6,22 @@
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
-<!--  Foreground service for persistent location  -->
+<!--  Foreground service for persistent location tracking  -->
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
 <!--  Persistent status-bar notification (required Android 13+)  -->
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 <!--  Keep CPU alive while tracking  -->
 <uses-permission android:name="android.permission.WAKE_LOCK"/>
-<!--  Appear on top of other apps  -->
+<!-- 
+    SYSTEM_ALERT_WINDOW = "Appear on top of other apps"
+    This permission makes the app appear in the system list at:
+    Settings → Apps → Special app access → Display over other apps
+    It MUST be declared here AND the targetSdkVersion must be 23+
+    for the app to appear in that list.
+   -->
 <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-<!--  Restart tracking after reboot  -->
+<!--  Restart tracking after phone reboot  -->
 <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 <!--  Vibration for SOS  -->
 <uses-permission android:name="android.permission.VIBRATE"/>
@@ -26,7 +32,7 @@
 <category android:name="android.intent.category.LAUNCHER"/>
 </intent-filter>
 </activity>
-<!--  Background location foreground services  -->
+<!--  Background location foreground services (transistorsoft background-geolocation)  -->
 <service android:name="com.transistorsoft.locationmanager.service.TrackingService" android:foregroundServiceType="location" android:exported="false"/>
 <service android:name="com.transistorsoft.locationmanager.service.LocationRequestService" android:foregroundServiceType="location" android:exported="false"/>
 <!--  Boot receiver — restarts tracking after phone reboot  -->
@@ -35,7 +41,10 @@
 <action android:name="android.intent.action.BOOT_COMPLETED"/>
 </intent-filter>
 </receiver>
-<!--  Notification channels for @capacitor/local-notifications  -->
+<!-- 
+      @capacitor/local-notifications default channel config.
+      importance=4 (HIGH) so the notification shows in the status bar immediately.
+     -->
 <meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_id" android:value="tuktrack_foreground"/>
 <meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_name" android:value="TukTrack Serviço Ativo"/>
 <meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_importance" android:value="4"/>
