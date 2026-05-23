@@ -30,18 +30,18 @@ export default defineConfig(({ mode }) => {
                 cacheName: 'google-fonts-cache',
                 expiration: {
                   maxEntries: 10,
-                  maxAgeSeconds: 60 * 60 * 24 * 365 // <== 365 days
+                  maxAgeSeconds: 60 * 60 * 24 * 365,
                 },
                 cacheableResponse: {
-                  statuses: [0, 200]
-                }
-              }
-            }
-          ]
+                  statuses: [0, 200],
+                },
+              },
+            },
+          ],
         },
         devOptions: {
           enabled: true,
-          type: 'module'
+          type: 'module',
         },
         manifest: {
           id: 'com.tuktrack.app',
@@ -56,28 +56,35 @@ export default defineConfig(({ mode }) => {
           start_url: '/',
           scope: '/',
           icons: [
-  {
-    src: '/pwa-192x192.png',
-    sizes: '192x192',
-    type: 'image/png',
-    purpose: 'any'
-  },
-  {
-    src: '/pwa-512x512.png',
-    sizes: '512x512',
-    type: 'image/png',
-    purpose: 'any'
-  },
-  {
-    src: '/pwa-512x512.png',
-    sizes: '512x512',
-    type: 'image/png',
-    purpose: 'maskable'
-  }
-]
-        }
-      })
+            {
+              src: '/pwa-192x192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: '/pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: '/pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable',
+            },
+          ],
+        },
+      }),
     ],
+    build: {
+      rollupOptions: {
+        // Exclude native Capacitor plugins from the web bundle.
+        // They are resolved at runtime inside the Android APK only.
+        external: ['@capacitor-community/background-geolocation'],
+      },
+    },
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'import.meta.env.VITE_MAPBOX_ACCESS_TOKEN': JSON.stringify(env.VITE_MAPBOX_ACCESS_TOKEN),
@@ -88,8 +95,6 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
     },
   };
