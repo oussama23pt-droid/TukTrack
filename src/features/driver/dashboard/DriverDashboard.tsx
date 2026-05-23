@@ -23,6 +23,19 @@ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
 // Falls back to watchPosition on web browser
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Module-level store shared between the React component and background callbacks.
+// Declared outside the component so it survives re-renders and is accessible
+// from Median/Capacitor native callbacks that run outside the React lifecycle.
+const _store: {
+  isOnline: boolean;
+  latestCoords: { lat: number; lng: number } | null;
+  onCoordsUpdate: ((coords: { lat: number; lng: number }) => void) | null;
+} = {
+  isOnline: false,
+  latestCoords: null,
+  onCoordsUpdate: null,
+};
+
 export default function DriverDashboard() {
   const { user, userData } = useAuth();
   const [isOnline, setIsOnline] = useState(userData?.isOnline || false);
