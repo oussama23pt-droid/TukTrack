@@ -757,16 +757,22 @@ export default function DriverDashboard() {
               },
               lastUpdated: serverTimestamp()
             });
-            // Always start watchPosition FIRST — location works immediately on screen
+            // STEP 1: Start watchPosition FIRST — location works immediately
             startLocationTracking();
             setIsOnline(true);
             setLocationStatus('active');
 
-            // AFTER tracking starts, ask for background permission on Median APK
-            // This is optional — if granted, tracking continues in background too
-            // If denied or unavailable, watchPosition still keeps working on screen
-            if ((window as any).median?.backgroundLocation && !backgroundLocationGranted.current) {
-              setTimeout(() => setShowBackgroundPermissionModal(true), 1000);
+            // STEP 2: Request permissions sequentially AFTER tracking starts
+            // This way location always works even if driver skips permissions
+            if ((window as any).median) {
+              // Request "Appear on top" (overlay) permission
+              if (!overlayPermissionGranted.current) {
+                setTimeout(() => setShowOverlayPermissionModal(true), 800);
+              }
+              // Request background location permission (after overlay modal)
+              else if (!backgroundLocationGranted.current) {
+                setTimeout(() => setShowBackgroundPermissionModal(true), 800);
+              }
             }
           } catch (err) {
             console.error('Failed to update online status:', err);
@@ -1664,7 +1670,7 @@ export default function DriverDashboard() {
                     setShowOverlayPermissionModal(false);
                     overlayPermissionGranted.current = true;
                     localStorage.setItem('tuktrack_overlay_granted', 'true');
-                    // Request SYSTEM_ALERT_WINDOW — opens Android settings for this permission
+                    // Request SYSTEM_ALERT_WINDOW permission
                     if ((window as any).median?.permissions) {
                       try {
                         await (window as any).median.permissions.request({
@@ -1674,8 +1680,10 @@ export default function DriverDashboard() {
                         console.warn('Overlay permission request failed:', e);
                       }
                     }
-                    // After returning from settings, proceed with going online
-                    handleGoOnline();
+                    // tracking already running — now show background location modal
+                    if (!backgroundLocationGranted.current) {
+                      setTimeout(() => setShowBackgroundPermissionModal(true), 800);
+                    }
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm"
                 >
@@ -1684,9 +1692,12 @@ export default function DriverDashboard() {
                 <button
                   onClick={() => {
                     setShowOverlayPermissionModal(false);
-                    overlayPermissionGranted.current = true; // skip next time
+                    overlayPermissionGranted.current = true;
                     localStorage.setItem('tuktrack_overlay_granted', 'true');
-                    handleGoOnline(); // proceed without overlay
+                    // tracking already running — show background location modal next
+                    if (!backgroundLocationGranted.current) {
+                      setTimeout(() => setShowBackgroundPermissionModal(true), 500);
+                    }
                   }}
                   className="w-full h-12 text-slate-400 font-bold text-sm hover:text-slate-200 transition-colors"
                 >
