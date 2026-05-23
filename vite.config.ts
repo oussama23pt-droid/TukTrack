@@ -56,31 +56,25 @@ export default defineConfig(({ mode }) => {
           start_url: '/',
           scope: '/',
           icons: [
-            {
-              src: '/logo.svg',
-              sizes: 'any',
-              type: 'image/svg+xml',
-              purpose: 'any'
-            },
-            {
-              src: '/logo.svg',
-              sizes: '192x192',
-              type: 'image/svg+xml',
-              purpose: 'any'
-            },
-            {
-              src: '/logo.svg',
-              sizes: '512x512',
-              type: 'image/svg+xml',
-              purpose: 'any'
-            },
-            {
-              src: '/logo.svg',
-              sizes: '512x512',
-              type: 'image/svg+xml',
-              purpose: 'maskable'
-            }
-          ]
+  {
+    src: '/pwa-192x192.png',
+    sizes: '192x192',
+    type: 'image/png',
+    purpose: 'any'
+  },
+  {
+    src: '/pwa-512x512.png',
+    sizes: '512x512',
+    type: 'image/png',
+    purpose: 'any'
+  },
+  {
+    src: '/pwa-512x512.png',
+    sizes: '512x512',
+    type: 'image/png',
+    purpose: 'maskable'
+  }
+]
         }
       })
     ],
