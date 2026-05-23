@@ -644,6 +644,58 @@ export default function DriverDashboard() {
     }
   };
 
+  // ─── PERSISTENT FOREGROUND NOTIFICATION ──────────────────────────────────────
+  // Shows a sticky "TukTrack — Online" notification in the Android status bar
+  // while the driver is online. This keeps the app alive as a foreground service.
+  const NOTIF_ID = 9001;
+
+  const showOnlineNotification = async () => {
+    try {
+      const { LocalNotifications } = await import('@capacitor/local-notifications');
+      const perm = await LocalNotifications.requestPermissions();
+      if (perm.display !== 'granted') return;
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id: NOTIF_ID,
+            title: 'TukTrack — Online 🟢',
+            body: 'A partilhar localização. Toque para abrir.',
+            ongoing: true,
+            autoCancel: false,
+            smallIcon: 'ic_launcher_foreground',
+            channelId: 'tuktrack_foreground',
+          },
+        ],
+      });
+      console.log('[Notif] Foreground notification shown');
+    } catch (e) {
+      console.warn('[Notif] LocalNotifications not available:', e);
+    }
+  };
+
+  const cancelOnlineNotification = async () => {
+    try {
+      const { LocalNotifications } = await import('@capacitor/local-notifications');
+      await LocalNotifications.cancel({ notifications: [{ id: NOTIF_ID }] });
+      console.log('[Notif] Foreground notification cancelled');
+    } catch (e) {
+      // Not available on web — ignore
+    }
+  };
+
+  // ─── OVERLAY ("Display over other apps") PERMISSION ──────────────────────────
+  const requestOverlayPermission = async () => {
+    if (overlayPermissionGranted.current) return;
+    try {
+      if ((window as any).Capacitor?.isNativePlatform?.()) {
+        setShowOverlayPermissionModal(true);
+        return;
+      }
+    } catch (e) { /* web — skip */ }
+    overlayPermissionGranted.current = true;
+  };
+  // ─────────────────────────────────────────────────────────────────────────────
+
   // Ref to always have current uid in background callback
   const _uidRef = React.useRef<string | null>(null);
 
@@ -754,6 +806,9 @@ export default function DriverDashboard() {
             startLocationTracking();
             setIsOnline(true);
             setLocationStatus('active');
+            // Show persistent status-bar notification and request overlay permission
+            showOnlineNotification();
+            requestOverlayPermission();
           } catch (err) {
             console.error('Failed to update online status:', err);
           } finally {
@@ -819,6 +874,7 @@ export default function DriverDashboard() {
       lastUpdateRef.current = 0; // reset throttle — next go-online writes position immediately
       stopLocationTracking();
       stopBackgroundLocation();
+      cancelOnlineNotification();
       await updateDoc(doc(db, 'users', user.uid), {
         isOnline: false,
         status: 'offline',
