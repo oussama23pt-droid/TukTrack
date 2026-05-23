@@ -753,14 +753,16 @@ export default function DriverDashboard() {
   // Opens Android Settings → Apps → TukTrack → Display over other apps
   const openOverlaySettings = async () => {
     try {
-      // Use Capacitor App plugin to open the system overlay settings screen
-      const { App } = await import('@capacitor/app');
-      // ACTION_MANAGE_OVERLAY_PERMISSION — correct URI for "Display over other apps" screen
-      await App.openUrl({
-        url: 'android.settings.action.MANAGE_OVERLAY_PERMISSION:package:com.tuktrack.app'
-      });
+      // Use the native AndroidBridge JavascriptInterface injected by MainActivity.kt.
+      // This fires Settings.ACTION_MANAGE_OVERLAY_PERMISSION directly, which opens
+      // the "Display over other apps" screen with TukTrack visible in the list.
+      if ((window as any).AndroidBridge) {
+        (window as any).AndroidBridge.openOverlaySettings();
+      } else {
+        // Fallback for web / iOS
+        alert('Vá a: Definições > Aplicações > TukTrack > Permissões especiais > Aparecer por cima de outras apps → Ativar');
+      }
     } catch (e) {
-      // Fallback: alert with manual instructions
       alert('Vá a: Definições > Aplicações > TukTrack > Permissões especiais > Aparecer por cima de outras apps → Ativar');
     }
   };
@@ -1857,8 +1859,13 @@ export default function DriverDashboard() {
                     // Open Android App Settings → Permissions → Location
                     // Driver changes to "Allow all the time" manually
                     try {
-                      const { App } = await import('@capacitor/app');
-                      await App.openUrl({ url: 'android.settings.APPLICATION_DETAILS_SETTINGS:package:com.tuktrack.app' });
+                      if ((window as any).AndroidBridge) {
+                        // Fires ACTION_APPLICATION_DETAILS_SETTINGS directly →
+                        // Settings > Apps > TukTrack > Permissions > Location > Allow all the time
+                        (window as any).AndroidBridge.openAppSettings();
+                      } else {
+                        alert('Vá a: Definições > Aplicações > TukTrack > Permissões > Localização > Permitir sempre');
+                      }
                     } catch (e) {
                       alert('Vá a: Definições > Aplicações > TukTrack > Permissões > Localização > Permitir sempre');
                     }
