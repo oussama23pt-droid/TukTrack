@@ -14,6 +14,9 @@ import { LocationPermissionModal } from '../../../components/LocationPermissionM
 import { LocationInstructionsModal } from '../../../components/LocationInstructionsModal';
 import Map, { Marker, Source, Layer, NavigationControl } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import { useAndroidPermissions } from '../../../hooks/useAndroidPermissions';
+import { OverlayPermissionModal } from '../../../components/OverlayPermissionModal';
+import { BackgroundLocationModal } from '../../../components/BackgroundLocationModal';
 
 // @ts-ignore
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
