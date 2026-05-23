@@ -15,6 +15,7 @@ import com.getcapacitor.BridgeActivity
 class MainActivity : BridgeActivity() {
 
     companion object {
+        private const val REQUEST_FINE_LOCATION = 1000
         private const val REQUEST_BACKGROUND_LOCATION = 1001
     }
 
@@ -29,41 +30,71 @@ class MainActivity : BridgeActivity() {
 
     inner class AndroidBridge {
 
+        // ── Overlay ("appear on top") ────────────────────────────────────────
+        // FIX: Removed FLAG_ACTIVITY_NEW_TASK — that flag caused Android to open
+        // the general overlay list instead of navigating directly to this app's
+        // entry, which also prevented the app from appearing in the list at all
+        // on Android 12+.
         @JavascriptInterface
         fun openOverlaySettings() {
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:${packageName}")
             )
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(intent)
         }
 
         @JavascriptInterface
-        fun openAppSettings() {
-            val intent = Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:${packageName}")
-            )
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(intent)
+        fun isOverlayGranted(): Boolean {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Settings.canDrawOverlays(this@MainActivity)
+            } else {
+                true
+            }
         }
 
+        // ── Location — two-step flow required on Android 11+ ────────────────
+        // FIX: Android 11+ (API 30+) forbids requesting ACCESS_BACKGROUND_LOCATION
+        // at the same time as foreground location. You MUST grant foreground first,
+        // then request background in a separate call. Skipping step 1 means the
+        // system dialog never shows "Allow all the time".
         @JavascriptInterface
         fun requestBackgroundLocation(): Boolean {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
-            val granted = ContextCompat.checkSelfPermission(
+
+            val fineGranted = ContextCompat.checkSelfPermission(
+                this@MainActivity,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            // Step 1: foreground location must be granted first
+            if (!fineGranted) {
+                ActivityCompat.requestPermissions(
+                    this@MainActivity,
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    ),
+                    REQUEST_FINE_LOCATION
+                )
+                return false // caller should re-invoke after user responds
+            }
+
+            // Step 2: now request background (shows "Allow all the time" option)
+            val bgGranted = ContextCompat.checkSelfPermission(
                 this@MainActivity,
                 Manifest.permission.ACCESS_BACKGROUND_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
+
+            if (!bgGranted) {
                 ActivityCompat.requestPermissions(
                     this@MainActivity,
                     arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
                     REQUEST_BACKGROUND_LOCATION
                 )
             }
-            return granted
+
+            return bgGranted
         }
 
         @JavascriptInterface
@@ -75,13 +106,26 @@ class MainActivity : BridgeActivity() {
             ) == PackageManager.PERMISSION_GRANTED
         }
 
+        // ── Fallback: open app's permission settings page directly ───────────
+        // Use this if the user dismissed the dialog or needs to change manually.
+        // They can then tap Permissions → Location → Allow all the time.
         @JavascriptInterface
-        fun isOverlayGranted(): Boolean {
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                Settings.canDrawOverlays(this@MainActivity)
-            } else {
-                true
-            }
+        fun openLocationSettings() {
+            val intent = Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:${packageName}")
+            )
+            startActivity(intent)
+        }
+
+        // ── General app settings (unchanged) ────────────────────────────────
+        @JavascriptInterface
+        fun openAppSettings() {
+            val intent = Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:${packageName}")
+            )
+            startActivity(intent)
         }
     }
 }
