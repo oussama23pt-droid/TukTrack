@@ -50,57 +50,30 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Create missing mipmap and drawable icon folders
+      - name: Generate app icons and notification icon
         run: |
           pip install pillow --quiet
           python3 - <<'PYEOF'
           from PIL import Image, ImageDraw
           import os
-
           base = "android/app/src/main/res"
-
-          # ── 1. App launcher icons (coloured blue circle) ──────────────────────
-          launcher_sizes = {
-            "mipmap-mdpi":    48,
-            "mipmap-hdpi":    72,
-            "mipmap-xhdpi":   96,
-            "mipmap-xxhdpi":  144,
-            "mipmap-xxxhdpi": 192,
-          }
-          for folder, size in launcher_sizes.items():
+          # Launcher icons â€” blue circle
+          for folder, size in [("mipmap-mdpi",48),("mipmap-hdpi",72),("mipmap-xhdpi",96),("mipmap-xxhdpi",144),("mipmap-xxxhdpi",192)]:
             path = os.path.join(base, folder)
             os.makedirs(path, exist_ok=True)
-            img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(img)
-            draw.ellipse([0, 0, size-1, size-1], fill=(37, 99, 235, 255))
-            img.save(os.path.join(path, "ic_launcher.png"))
-            img.save(os.path.join(path, "ic_launcher_round.png"))
-            print(f"Created {folder}/ic_launcher.png ({size}x{size})")
-
-          # ── 2. Notification status-bar icon (white on transparent) ────────────
-          # Android requires notification small icons to be white/grey on transparent.
-          # We create ic_stat_icon in drawable folders for all densities.
-          notif_sizes = {
-            "drawable-mdpi":    24,
-            "drawable-hdpi":    36,
-            "drawable-xhdpi":   48,
-            "drawable-xxhdpi":  72,
-            "drawable-xxxhdpi": 96,
-          }
-          for folder, size in notif_sizes.items():
+            img = Image.new("RGBA",(size,size),(0,0,0,0))
+            ImageDraw.Draw(img).ellipse([0,0,size-1,size-1],fill=(37,99,235,255))
+            img.save(os.path.join(path,"ic_launcher.png"))
+            img.save(os.path.join(path,"ic_launcher_round.png"))
+          # Notification icon â€” white on transparent (Android requirement)
+          for folder, size in [("drawable-mdpi",24),("drawable-hdpi",36),("drawable-xhdpi",48),("drawable-xxhdpi",72),("drawable-xxxhdpi",96)]:
             path = os.path.join(base, folder)
             os.makedirs(path, exist_ok=True)
-            # White circle on transparent background
-            img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(img)
-            margin = size // 8
-            draw.ellipse(
-              [margin, margin, size-margin-1, size-margin-1],
-              fill=(255, 255, 255, 255)
-            )
-            img.save(os.path.join(path, "ic_stat_icon.png"))
-            print(f"Created {folder}/ic_stat_icon.png ({size}x{size})")
-
+            img = Image.new("RGBA",(size,size),(0,0,0,0))
+            m = size//8
+            ImageDraw.Draw(img).ellipse([m,m,size-m-1,size-m-1],fill=(255,255,255,255))
+            img.save(os.path.join(path,"ic_stat_icon.png"))
+          print("All icons generated")
           PYEOF
 
       - name: Install Gradle and generate wrapper
