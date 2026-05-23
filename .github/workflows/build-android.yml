@@ -17,7 +17,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -41,39 +41,20 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
 
-      # IMPORTANT: We do NOT run `cap add android` or `cap update android`.
-      # The android/ folder is fully committed to the repo with our custom
-      # AndroidManifest.xml, MainActivity.kt, and build.gradle files.
-      # `cap sync` only copies the web dist and merges plugin config —
-      # it does NOT regenerate or overwrite native files.
-      - name: Sync Capacitor (web dist + plugin manifests only)
+      - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Download Gradle wrapper
-        run: |
-          cd android
-          gradle wrapper --gradle-version 8.4 || true
-          chmod +x gradlew
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
 
       - name: Build Debug APK
         run: |
           cd android
           ./gradlew assembleDebug --stacktrace
-      - name: Build Release AAB
-        run: |
-          cd android
-          ./gradlew bundleRelease --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: TukTrack-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
-
-      - name: Upload AAB
-        uses: actions/upload-artifact@v4
-        with:
-          name: TukTrack-AAB
-          path: android/app/build/outputs/bundle/release/app-release.aab
           retention-days: 30
