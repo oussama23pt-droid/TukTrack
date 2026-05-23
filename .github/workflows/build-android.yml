@@ -31,7 +31,7 @@ jobs:
         run: yes | sdkmanager --licenses || true
 
       - name: Install Android platform and build tools
-        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
       - name: Install dependencies
         run: npm install
@@ -52,21 +52,20 @@ jobs:
 
       - name: Install Gradle and generate wrapper
         run: |
-          # Download the official Gradle 8.4 distribution
           curl -fL -o /tmp/gradle-8.4-bin.zip \
             https://services.gradle.org/distributions/gradle-8.4-bin.zip
           unzip -q /tmp/gradle-8.4-bin.zip -d /tmp/gradle-dist
-
-          # Use it to regenerate gradle-wrapper.jar inside the android folder
           cd android
           /tmp/gradle-dist/gradle-8.4/bin/gradle wrapper --gradle-version 8.4
           chmod +x gradlew
-          ls -lh gradle/wrapper/
 
       - name: Build Debug APK
         run: |
           cd android
           ./gradlew assembleDebug --stacktrace
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
