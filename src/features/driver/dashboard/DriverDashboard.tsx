@@ -755,9 +755,9 @@ export default function DriverDashboard() {
     try {
       // Use Capacitor App plugin to open the system overlay settings screen
       const { App } = await import('@capacitor/app');
-      // ACTION_MANAGE_OVERLAY_PERMISSION opens directly to the overlay toggle
-      await (App as any).openUrl({
-        url: 'package:com.tuktrack.app'
+      // ACTION_MANAGE_OVERLAY_PERMISSION — correct URI for "Display over other apps" screen
+      await App.openUrl({
+        url: 'android.settings.action.MANAGE_OVERLAY_PERMISSION:package:com.tuktrack.app'
       });
     } catch (e) {
       // Fallback: alert with manual instructions
@@ -1858,7 +1858,7 @@ export default function DriverDashboard() {
                     // Driver changes to "Allow all the time" manually
                     try {
                       const { App } = await import('@capacitor/app');
-                      await (App as any).openUrl({ url: 'package:com.tuktrack.app' });
+                      await App.openUrl({ url: 'android.settings.APPLICATION_DETAILS_SETTINGS:package:com.tuktrack.app' });
                     } catch (e) {
                       alert('Vá a: Definições > Aplicações > TukTrack > Permissões > Localização > Permitir sempre');
                     }
