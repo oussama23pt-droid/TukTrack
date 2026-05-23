@@ -1,0 +1,5 @@
+rootProject.name = 'TukTrack'
+
+apply from: 'capacitor.settings.gradle'
+
+include ':app'
