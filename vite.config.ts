@@ -82,7 +82,10 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         // Exclude native Capacitor plugins from the web bundle.
         // They are resolved at runtime inside the Android APK only.
-        external: ['@capacitor-community/background-geolocation'],
+        external: [
+          '@capacitor-community/background-geolocation',
+          '@capacitor/local-notifications',
+        ],
       },
     },
     define: {
