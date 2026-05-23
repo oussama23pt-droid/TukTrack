@@ -42,25 +42,29 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
 
-      # NOTE: We do NOT run `cap add android` here because the android/ folder
-      # is committed to the repo with our custom AndroidManifest.xml and
-      # MainActivity.kt already in place. Running `cap add` would overwrite them.
-
-      - name: Sync Capacitor (copies web dist + merges plugin config)
+      # IMPORTANT: We do NOT run `cap add android` or `cap update android`.
+      # The android/ folder is fully committed to the repo with our custom
+      # AndroidManifest.xml, MainActivity.kt, and build.gradle files.
+      # `cap sync` only copies the web dist and merges plugin config —
+      # it does NOT regenerate or overwrite native files.
+      - name: Sync Capacitor (web dist + plugin manifests only)
         run: npx cap sync android
 
-      - name: Make gradlew executable
-        run: chmod +x android/gradlew
+      - name: Download Gradle wrapper
+        run: |
+          cd android
+          gradle wrapper --gradle-version 8.4 || true
+          chmod +x gradlew
 
       - name: Build Debug APK
         run: |
           cd android
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --stacktrace
 
       - name: Build Release AAB
         run: |
           cd android
-          ./gradlew bundleRelease
+          ./gradlew bundleRelease --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
