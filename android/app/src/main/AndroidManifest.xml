@@ -9,22 +9,24 @@
 <!--  Foreground service for persistent location notification  -->
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+<!--  Persistent status-bar notification (required on Android 13+)  -->
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 <!--  Keep CPU running while tracking  -->
 <uses-permission android:name="android.permission.WAKE_LOCK"/>
-<!--  Appear on top / overlay  -->
+<!--  Appear on top / overlay over other apps  -->
 <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
 <!--  Restart tracking after phone reboot  -->
 <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 <!--  Vibration for SOS  -->
 <uses-permission android:name="android.permission.VIBRATE"/>
 <application android:allowBackup="true" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:roundIcon="@mipmap/ic_launcher_round" android:supportsRtl="true" android:theme="@style/AppTheme" android:usesCleartextTraffic="true" android:hardwareAccelerated="true">
-<activity android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode" android:name=".MainActivity" android:label="@string/title_activity_main" android:theme="@style/AppTheme.NoActionBarLaunch" android:launchMode="singleTask" android:exported="true">
+<activity android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode" android:name=".MainActivity" android:label="@string/title_activity_main" android:theme="@style/AppTheme.NoActionBarLaunch" android:launchMode="singleTask" android:exported="true" android:showOnLockScreen="true">
 <intent-filter>
 <action android:name="android.intent.action.MAIN"/>
 <category android:name="android.intent.category.LAUNCHER"/>
 </intent-filter>
 </activity>
-<!--  Background location foreground service  -->
+<!--  Background location foreground services  -->
 <service android:name="com.transistorsoft.locationmanager.service.TrackingService" android:foregroundServiceType="location" android:exported="false"/>
 <service android:name="com.transistorsoft.locationmanager.service.LocationRequestService" android:foregroundServiceType="location" android:exported="false"/>
 <!--  Boot receiver to restart tracking after reboot  -->
@@ -33,6 +35,10 @@
 <action android:name="android.intent.action.BOOT_COMPLETED"/>
 </intent-filter>
 </receiver>
+<!--  Notification channel for persistent online notification  -->
+<meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_id" android:value="tuktrack_foreground"/>
+<meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_name" android:value="TukTrack Serviço"/>
+<meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_importance" android:value="3"/>
 <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.fileprovider" android:exported="false" android:grantUriPermissions="true">
 <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths"/>
 </provider>
