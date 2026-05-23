@@ -751,53 +751,15 @@ export default function DriverDashboard() {
     }
   };
 
-  // ─── OVERLAY ("Display over other apps") PERMISSION ──────────────────────────
-  // Calls AndroidBridge.openOverlaySettings() injected by MainActivity.kt.
-  // This fires Settings.ACTION_MANAGE_OVERLAY_PERMISSION which opens the
-  // "Display over other apps" screen with TukTrack listed and toggleable.
-  const openOverlaySettings = () => {
-    if ((window as any).AndroidBridge) {
-      (window as any).AndroidBridge.openOverlaySettings();
-    } else {
-      alert('Vá a: Definições > Aplicações > TukTrack > Permissões especiais > Aparecer por cima de outras apps → Ativar');
-    }
-  };
-
-  // Check if overlay permission was granted after driver returns from Settings
-  const checkOverlayOnResume = () => {
-    if ((window as any).AndroidBridge?.isOverlayGranted?.()) {
-      overlayPermissionGranted.current = true;
-      localStorage.setItem('tuktrack_overlay_granted', 'true');
-    }
-  };
-
   const requestOverlayPermission = () => {
-    if (overlayPermissionGranted.current) return;
-    // If AndroidBridge is available, check live state first
-    if ((window as any).AndroidBridge?.isOverlayGranted?.()) {
-      overlayPermissionGranted.current = true;
-      localStorage.setItem('tuktrack_overlay_granted', 'true');
-      return;
-    }
+    if (androidPerms.state.overlay) return;
     setShowOverlayPermissionModal(true);
   };
 
-  // ─── "ALLOW ALL THE TIME" LOCATION PERMISSION ────────────────────────────────
-  // On Android 10+ ACCESS_BACKGROUND_LOCATION must be requested SEPARATELY
-  // after ACCESS_FINE_LOCATION is already granted. We first try the runtime
-  // dialog via AndroidBridge.requestBackgroundLocation(); if that's unavailable
-  // or already granted, we open App Settings so the driver can set it manually.
   const requestBackgroundLocationPermission = () => {
-    if (backgroundLocationGranted.current) return;
-    // Check live state
-    if ((window as any).AndroidBridge?.isBackgroundLocationGranted?.()) {
-      backgroundLocationGranted.current = true;
-      localStorage.setItem('tuktrack_bg_location_granted', 'true');
-      return;
-    }
-    setTimeout(() => setShowBackgroundPermissionModal(true), 600);
+    if (androidPerms.state.backgroundLocation) return;
+    setShowBackgroundPermissionModal(true);
   };
-  // ─────────────────────────────────────────────────────────────────────────────
 
   // Ref to always have current uid in background callback
   const _uidRef = React.useRef<string | null>(null);
@@ -914,7 +876,7 @@ export default function DriverDashboard() {
             // 2. Ask overlay permission (appear on top)
             requestOverlayPermission();
             // 3. Ask "Allow all the time" location (shown after overlay modal closes)
-            if (!backgroundLocationGranted.current) {
+            if (!androidPerms.state.backgroundLocation) {
               setTimeout(() => requestBackgroundLocationPermission(), 1200);
             }
           } catch (err) {
@@ -1755,181 +1717,26 @@ export default function DriverDashboard() {
         onRetry={handleGoOnline}
       />
 
-      {/* Overlay Permission Modal — "Display over other apps" */}
-      <AnimatePresence>
-        {showOverlayPermissionModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[350] bg-navy/95 backdrop-blur-xl flex items-end justify-center p-6"
-          >
-            <motion.div
-              initial={{ y: 100, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 100, opacity: 0 }}
-              className="bg-navy border border-white/10 rounded-[2rem] p-8 w-full max-w-md shadow-2xl"
-            >
-              {/* Icon */}
-              <div className="w-20 h-20 bg-amber/10 rounded-[2rem] flex items-center justify-center mx-auto mb-5 border border-amber/20">
-                <div className="text-4xl">📱</div>
-              </div>
+      <OverlayPermissionModal
+        isOpen={showOverlayPermissionModal}
+        onClose={() => setShowOverlayPermissionModal(false)}
+        onDone={() => {
+          setShowOverlayPermissionModal(false);
+          androidPerms.refresh();
+          if (!androidPerms.state.backgroundLocation) {
+            setTimeout(() => setShowBackgroundPermissionModal(true), 800);
+          }
+        }}
+      />
 
-              <div className="flex items-center justify-center space-x-2 mb-3">
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-amber">Permissão Necessária</span>
-              </div>
-
-              <h3 className="text-2xl font-black text-white text-center mb-4 leading-tight italic">
-                Manter App Visível
-              </h3>
-
-              <div className="bg-white/5 border border-white/10 rounded-2xl p-5 mb-6">
-                <p className="text-slate-300 text-sm font-medium leading-relaxed mb-4">
-                  Para que o TukTrack continue a funcionar enquanto usa outras aplicações, precisamos da permissão <strong className="text-amber">"Superposição sobre outras apps"</strong>.
-                </p>
-                <div className="space-y-2">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-amber mb-2">No próximo ecrã:</p>
-                  <div className="flex items-start space-x-2">
-                    <span className="text-amber font-black text-sm">1.</span>
-                    <span className="text-slate-300 text-xs font-medium">Encontre <strong className="text-white">TukTrack</strong> na lista</span>
-                  </div>
-                  <div className="flex items-start space-x-2">
-                    <span className="text-amber font-black text-sm">2.</span>
-                    <span className="text-slate-300 text-xs font-medium">Toque em <strong className="text-white">TukTrack</strong></span>
-                  </div>
-                  <div className="flex items-start space-x-2">
-                    <span className="text-amber font-black text-sm">3.</span>
-                    <span className="text-slate-300 text-xs font-medium">Ative <strong className="text-amber">"Autorizar superposição"</strong></span>
-                  </div>
-                  <div className="flex items-start space-x-2">
-                    <span className="text-amber font-black text-sm">4.</span>
-                    <span className="text-slate-300 text-xs font-medium">Volte ao TukTrack e prima <strong className="text-white">GO!</strong></span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col space-y-3">
-                <button
-                  onClick={() => {
-                    setShowOverlayPermissionModal(false);
-                    // Open the native Settings screen — driver toggles TukTrack on
-                    openOverlaySettings();
-                    // Poll for 10s after driver returns from Settings to detect grant
-                    let checks = 0;
-                    const poll = setInterval(() => {
-                      checks++;
-                      if ((window as any).AndroidBridge?.isOverlayGranted?.()) {
-                        overlayPermissionGranted.current = true;
-                        localStorage.setItem('tuktrack_overlay_granted', 'true');
-                        clearInterval(poll);
-                      }
-                      if (checks >= 20) clearInterval(poll);
-                    }, 500);
-                    // Show background location modal after delay
-                    if (!backgroundLocationGranted.current) {
-                      setTimeout(() => setShowBackgroundPermissionModal(true), 1500);
-                    }
-                  }}
-                  className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm"
-                >
-                  Abrir Definições de Permissão
-                </button>
-                <button
-                  onClick={() => {
-                    setShowOverlayPermissionModal(false);
-                    overlayPermissionGranted.current = true;
-                    localStorage.setItem('tuktrack_overlay_granted', 'true');
-                    // tracking already running — show background location modal next
-                    if (!backgroundLocationGranted.current) {
-                      setTimeout(() => setShowBackgroundPermissionModal(true), 500);
-                    }
-                  }}
-                  className="w-full h-12 text-slate-400 font-bold text-sm hover:text-slate-200 transition-colors"
-                >
-                  Continuar sem esta permissão
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Background Location Permission Modal */}
-      <AnimatePresence>
-        {showBackgroundPermissionModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-sm flex items-end justify-center p-6"
-          >
-            <motion.div
-              initial={{ y: 100, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 100, opacity: 0 }}
-              className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl"
-            >
-              <div className="w-16 h-16 bg-amber/10 rounded-full flex items-center justify-center mx-auto mb-5 text-amber">
-                <MapPin size={32} />
-              </div>
-              <h3 className="text-xl font-black text-navy text-center mb-2">Localização em Segundo Plano</h3>
-              <p className="text-sm text-slate-500 text-center font-medium mb-6 leading-relaxed">
-                Para partilhar a sua localização enquanto usa outras aplicações, o TukTrack precisa de acesso à localização em segundo plano.<br/><br/>
-                No próximo ecrã, selecione <strong>"Permitir sempre"</strong>.
-              </p>
-              <div className="flex flex-col space-y-3">
-                <button
-                  onClick={() => {
-                    setShowBackgroundPermissionModal(false);
-                    if ((window as any).AndroidBridge) {
-                      // Step 1: try the runtime permission dialog first
-                      // (works if ACCESS_FINE_LOCATION is already granted)
-                      const alreadyGranted = (window as any).AndroidBridge.requestBackgroundLocation();
-                      if (!alreadyGranted) {
-                        // Poll until driver grants it or gives up
-                        let checks = 0;
-                        const poll = setInterval(() => {
-                          checks++;
-                          if ((window as any).AndroidBridge?.isBackgroundLocationGranted?.()) {
-                            backgroundLocationGranted.current = true;
-                            localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                            clearInterval(poll);
-                          }
-                          // After 15s if still not granted, open App Settings
-                          if (checks >= 30) {
-                            clearInterval(poll);
-                            if (!(window as any).AndroidBridge?.isBackgroundLocationGranted?.()) {
-                              (window as any).AndroidBridge.openAppSettings();
-                            }
-                          }
-                        }, 500);
-                      } else {
-                        backgroundLocationGranted.current = true;
-                        localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                      }
-                    } else {
-                      alert('Vá a: Definições > Aplicações > TukTrack > Permissões > Localização > Permitir sempre');
-                    }
-                  }}
-                  className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
-                >
-                  Permitir Localização em Segundo Plano
-                </button>
-                <button
-                  onClick={() => {
-                    setShowBackgroundPermissionModal(false);
-                    backgroundLocationGranted.current = true;
-                    localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                  }}
-                  className="w-full h-12 text-slate-400 font-bold text-sm"
-                >
-                  Continuar sem segundo plano
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <BackgroundLocationModal
+        isOpen={showBackgroundPermissionModal}
+        onClose={() => setShowBackgroundPermissionModal(false)}
+        onDone={() => {
+          setShowBackgroundPermissionModal(false);
+          androidPerms.refresh();
+        }}
+      />
 
       {/* Shift Start Modal — prompts driver to go online */}
       <AnimatePresence>
