@@ -42,13 +42,11 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
 
-      - name: Add Android platform
-        run: npx cap add android || true
+      # NOTE: We do NOT run `cap add android` here because the android/ folder
+      # is committed to the repo with our custom AndroidManifest.xml and
+      # MainActivity.kt already in place. Running `cap add` would overwrite them.
 
-      - name: Update Capacitor plugins
-        run: npx cap update android
-
-      - name: Sync Capacitor
+      - name: Sync Capacitor (copies web dist + merges plugin config)
         run: npx cap sync android
 
       - name: Make gradlew executable
