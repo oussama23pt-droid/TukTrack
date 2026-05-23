@@ -310,3 +310,56 @@ export const cancelSubscription = onCall(async (request: CallableRequest<any>) =
     handleFirestoreError(error, OperationType.WRITE, path, authUid);
   }
 });
+
+// ─── 5. sendDriverNotification ────────────────────────────────────────────────
+// Triggered when manager creates a notification in Firestore
+// Sends push notification to all drivers via OneSignal
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
+
+export const sendDriverNotification = onDocumentCreated(
+  "notifications/{notifId}",
+  async (event) => {
+    const notif = event.data?.data();
+    if (!notif) return;
+    if (!notif.isForDrivers) return; // only send to drivers
+
+    const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID;
+    const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY;
+
+    if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) {
+      console.error("OneSignal keys not configured");
+      return;
+    }
+
+    try {
+      const response = await fetch("https://onesignal.com/api/v1/notifications", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Basic ${ONESIGNAL_REST_API_KEY}`,
+        },
+        body: JSON.stringify({
+          app_id: ONESIGNAL_APP_ID,
+          included_segments: ["All"], // send to all subscribed drivers
+          headings: { en: notif.title || "TukTrack", pt: notif.title || "TukTrack" },
+          contents: { en: notif.message || "", pt: notif.message || "" },
+          data: {
+            type: notif.type || "info",
+            notifId: event.params.notifId,
+          },
+          android_channel_id: "tuktrack-alerts",
+          priority: 10,
+          ttl: 3600,
+        }),
+      });
+
+      const result = await response.json();
+      console.log("OneSignal push sent:", JSON.stringify(result));
+
+      // Mark notification as pushed
+      await event.data?.ref.update({ pushSent: true, pushedAt: admin.firestore.Timestamp.now() });
+    } catch (err) {
+      console.error("OneSignal push failed:", err);
+    }
+  }
+);
