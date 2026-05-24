@@ -44,9 +44,29 @@ jobs:
         run: |
           cd android
           mkdir -p gradle/wrapper
-          curl -o gradle/wrapper/gradle-wrapper.jar \
+          curl -L -o gradle/wrapper/gradle-wrapper.jar \
             https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar
-          chmod +x gradlew
+
+      - name: Generate missing app icons
+        run: |
+          sudo apt-get install -y imagemagick
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            dir="android/app/src/main/res/mipmap-${density}"
+            mkdir -p "$dir"
+            size=48
+            [ "$density" = "hdpi" ]    && size=72
+            [ "$density" = "xhdpi" ]   && size=96
+            [ "$density" = "xxhdpi" ]  && size=144
+            [ "$density" = "xxxhdpi" ] && size=192
+            convert -size ${size}x${size} xc:#0f172a \
+              -fill '#f59e0b' -draw "circle $((size/2)),$((size/2)) $((size/2)),4" \
+              "$dir/ic_launcher.png"
+            cp "$dir/ic_launcher.png" "$dir/ic_launcher_round.png"
+            cp "$dir/ic_launcher.png" "$dir/ic_launcher_foreground.png"
+          done
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
 
       - name: Build debug APK
         run: cd android && ./gradlew assembleDebug --no-daemon
