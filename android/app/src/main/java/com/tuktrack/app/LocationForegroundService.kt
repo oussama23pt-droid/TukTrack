@@ -8,58 +8,63 @@ import android.app.Service
 import android.content.Intent
 import android.location.Location
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.google.android.gms.location.*
 
-/**
- * LocationForegroundService
- *
- * An Android Foreground Service — the only way to:
- *   1. Show a notification the USER CANNOT DISMISS (when tied to startForeground).
- *   2. Keep the app process permanently awake in the background.
- *   3. Keep GPS running when the driver switches apps or locks the screen.
- *
- * Key facts about foreground service notifications:
- *   - They are posted via startForeground(id, notification) — NOT NotificationManager.notify().
- *   - Android NEVER allows the user to dismiss a notification posted by startForeground().
- *   - The "Clear all" button in the notification panel skips them entirely.
- *   - They disappear ONLY when the service is stopped (driver goes offline).
- */
 class LocationForegroundService : Service() {
 
     companion object {
-        private const val CHANNEL_ID      = "tuktrack_online"
-        private const val NOTIFICATION_ID = 1001  // must match the ID used in startForeground
+        const val CHANNEL_ID      = "tuktrack_online"
+        const val NOTIFICATION_ID = 1001
+        const val EXTRA_SHIFT_START = "shift_start_epoch_ms"
     }
 
     private lateinit var fusedClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
     private var wakeLock: PowerManager.WakeLock? = null
 
+    // Timer that updates the notification every second
+    private val handler = Handler(Looper.getMainLooper())
+    private var shiftStartMs: Long = 0L
+
+    private val timerRunnable = object : Runnable {
+        override fun run() {
+            updateNotification()
+            handler.postDelayed(this, 1000)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         fusedClient = LocationServices.getFusedLocationProviderClient(this)
+        createChannel()
 
-        // WakeLock: prevents the CPU from sleeping so Firebase listeners and
-        // GPS updates keep running even when the screen is off.
+        // WakeLock: keeps CPU alive even when screen is off
         val pm = getSystemService(PowerManager::class.java)
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "TukTrack::LocationWakeLock"
-        ).also { it.acquire(12 * 60 * 60 * 1000L) } // max 12 hours per shift
+        ).also { it.acquire(12 * 60 * 60 * 1000L) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        createChannel()
-        // startForeground() is what makes the notification non-dismissable.
-        // This is fundamentally different from NotificationManager.notify().
+        // Receive shift start time from JS (milliseconds since epoch)
+        shiftStartMs = intent?.getLongExtra(EXTRA_SHIFT_START, 0L) ?: 0L
+        if (shiftStartMs == 0L) shiftStartMs = System.currentTimeMillis()
+
+        // THIS is the key — startForeground() posts a notification that
+        // Android NEVER lets the user dismiss, not even with "Clear all"
         startForeground(NOTIFICATION_ID, buildNotification())
         startLocationUpdates()
-        // START_STICKY: if Android kills this service due to memory pressure,
-        // it will be automatically restarted — driver stays online.
+
+        // Start live timer — updates notification every second
+        handler.removeCallbacks(timerRunnable)
+        handler.post(timerRunnable)
+
         return START_STICKY
     }
 
@@ -67,14 +72,28 @@ class LocationForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (::locationCallback.isInitialized) {
-            fusedClient.removeLocationUpdates(locationCallback)
-        }
-        // Release WakeLock when driver goes offline
+        handler.removeCallbacks(timerRunnable)
+        try { fusedClient.removeLocationUpdates(locationCallback) } catch (e: Exception) {}
         try { wakeLock?.release() } catch (e: Exception) {}
     }
 
+    // Called every second by timerRunnable to refresh the elapsed time
+    private fun updateNotification() {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.notify(NOTIFICATION_ID, buildNotification())
+    }
+
     private fun buildNotification(): Notification {
+        val elapsed = System.currentTimeMillis() - shiftStartMs
+        val totalSecs = (elapsed / 1000).coerceAtLeast(0)
+        val h = totalSecs / 3600
+        val m = (totalSecs % 3600) / 60
+        val s = totalSecs % 60
+        val timer = if (h > 0)
+            String.format("%d:%02d:%02d", h, m, s)
+        else
+            String.format("%02d:%02d", m, s)
+
         val tapIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java).apply {
@@ -84,16 +103,20 @@ class LocationForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("🟢 TukTrack — Online")
+            .setContentTitle("🟢 TukTrack — Em Serviço  •  $timer")
             .setContentText("A partilhar localização em tempo real. Toque para abrir.")
             .setSmallIcon(R.drawable.ic_stat_icon)
             .setColor(0xFFF59E0B.toInt())
             .setContentIntent(tapIntent)
-            .setOngoing(true)       // reinforces non-dismissable intent
-            .setSilent(true)        // no sound — status bar only
+            .setOngoing(true)           // non-dismissable flag
+            .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            // UsesChronometer makes Android show a live ticking clock in the notification
+            .setUsesChronometer(true)
+            .setChronometerCountDown(false)
+            .setWhen(shiftStartMs)
             .build()
     }
 
@@ -106,6 +129,9 @@ class LocationForegroundService : Service() {
             ).apply {
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                // IMPORTANT: disabling user ability to turn off this channel
+                // prevents the driver from accidentally hiding it
+                setBlockable(false)
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
@@ -113,7 +139,7 @@ class LocationForegroundService : Service() {
 
     private fun startLocationUpdates() {
         val request = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY, 5000L
+            Priority.PRIORITY_HIGH_ACCURACY, 4000L
         ).apply {
             setMinUpdateIntervalMillis(3000L)
             setWaitForAccurateLocation(false)
@@ -122,27 +148,17 @@ class LocationForegroundService : Service() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc: Location = result.lastLocation ?: return
-                broadcastLocation(loc.latitude, loc.longitude, loc.accuracy)
+                sendBroadcast(Intent("com.tuktrack.LOCATION_UPDATE").apply {
+                    putExtra("lat", loc.latitude)
+                    putExtra("lng", loc.longitude)
+                    putExtra("accuracy", loc.accuracy)
+                    setPackage(packageName)
+                })
             }
         }
 
         try {
             fusedClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
-        } catch (e: SecurityException) {
-            stopSelf()
-        }
-    }
-
-    private fun broadcastLocation(lat: Double, lng: Double, accuracy: Float) {
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            try {
-                sendBroadcast(Intent("com.tuktrack.LOCATION_UPDATE").apply {
-                    putExtra("lat", lat)
-                    putExtra("lng", lng)
-                    putExtra("accuracy", accuracy)
-                    setPackage(packageName)
-                })
-            } catch (e: Exception) {}
-        }
+        } catch (e: SecurityException) { stopSelf() }
     }
 }
