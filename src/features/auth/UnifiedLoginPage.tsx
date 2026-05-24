@@ -48,10 +48,11 @@ export default function UnifiedLoginPage() {
   });
 
   useEffect(() => {
-    // We remove the automatic immediate redirect to allow users to reach this page even if logged in
-    // This solves the problem of "cannot go to login page"
-    // However, for a better UX, we could still do it if they just landed here without a specific intent
-    // But since the user complained, we'll make it explicit.
+    // Auto-redirect if already logged in — no confirmation screen
+    if (!loading && user && userData) {
+      const target = userData.role === 'driver' ? '/driver/dashboard' : '/manager/dashboard';
+      navigate(target, { replace: true });
+    }
   }, [user, userData, loading, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -306,43 +307,12 @@ export default function UnifiedLoginPage() {
     );
   }
 
-  // ALREADY LOGGED IN STATE
+  // ALREADY LOGGED IN — show spinner while useEffect redirects
   if (user && userData) {
-    const targetDashboard = (userData.role === 'driver') ? 'driver' : 'manager';
     return (
-      <div className="flex min-h-screen flex-col bg-slate-50 p-6 text-slate-800 text-center justify-center relative overflow-hidden">
-        <div className="absolute -top-24 -left-24 w-64 h-64 bg-amber/10 blur-[100px] rounded-full" />
-        <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-blue-500/5 blur-[120px] rounded-full" />
-
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-sm mx-auto bg-white border border-slate-200 rounded-[2.5rem] p-10 shadow-2xl relative z-10"
-        >
-          <div className="w-20 h-20 bg-amber/10 rounded-full flex items-center justify-center mx-auto mb-6">
-            <span className="text-3xl font-black text-amber italic">?</span>
-          </div>
-          <h2 className="text-2xl font-black text-navy mb-2 italic uppercase tracking-tighter">
-            {i18n.language === 'en' ? 'Already Logged In' : 'Já Iniciou Sessão'}
-          </h2>
-          <p className="text-slate-500 mb-8 font-medium">
-            {i18n.language === 'en' ? 'You are authenticated as' : 'Está autenticado como'} <span className="text-navy font-bold">{userData.name}</span> ({userData.role}).
-          </p>
-
-          <div className="space-y-4">
-            <button
-              onClick={() => navigate(`/${targetDashboard}/dashboard`)}
-              className="w-full h-14 bg-navy text-white font-black rounded-2xl hover:bg-slate-900 transition-all shadow-xl shadow-navy/20 uppercase tracking-widest text-[10px]"
-            >
-              {i18n.language === 'en' ? 'Go to Dashboard' : 'Ir para o Dashboard'}
-            </button>
-            <button
-              onClick={() => auth.signOut()}
-              className="w-full h-14 bg-slate-50 border border-slate-200 text-slate-400 font-bold rounded-2xl hover:bg-red-50 hover:text-red-500 hover:border-red-100 transition-all uppercase tracking-widest text-[10px]"
-            >
-              {t('logout')}
-            </button>
-          </div>
+      <div className="flex min-h-screen flex-col bg-slate-50 items-center justify-center">
+        <div className="w-12 h-12 border-4 border-amber border-t-transparent rounded-full animate-spin mb-4" />
+        <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">A entrar...</p>
         </motion.div>
       </div>
     );
