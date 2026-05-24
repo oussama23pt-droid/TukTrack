@@ -46,9 +46,11 @@ export default function ManagerMessagesPage() {
     if (!user || !selectedDriver) return;
     prevCountRef.current = 0;
 
+    if (!selectedDriver) return;
     const q = query(
       collection(db, 'messages'),
       where('managerId', '==', user.uid),
+      where('driverUid', '==', selectedDriver.uid),
       orderBy('createdAt', 'asc')
     );
 
@@ -91,6 +93,7 @@ export default function ManagerMessagesPage() {
         senderName: userData.name || 'Gestor',
         senderRole: 'manager',
         managerId: user.uid,
+        driverUid: selectedDriver.uid,
         targetDriverId: selectedDriver.uid,
         createdAt: serverTimestamp(),
         read: false,
