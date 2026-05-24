@@ -13,6 +13,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -28,13 +30,14 @@ class MainActivity : BridgeActivity() {
         private const val REQUEST_FINE_LOCATION       = 1000
         private const val REQUEST_BACKGROUND_LOCATION = 1001
         private const val REQUEST_NOTIFICATION        = 1002
-        private const val CHANNEL_ONLINE              = "tuktrack_online"
+        // Keep in sync with LocationForegroundService.CHANNEL_ID
+        private const val CHANNEL_ONLINE              = "tuktrack_gps_v2"
         private const val CHANNEL_ALERTS              = "tuktrack_alerts"
     }
 
     // Receives GPS coords from LocationForegroundService → forwards to WebView
-    // This runs while the app is in the foreground or background (but NOT killed).
-    // When the app is killed the service writes directly to Firestore via REST.
+    // Only runs while app is in foreground/background — NOT when killed.
+    // When killed, the service writes directly to Firestore via REST.
     private val locationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != "com.tuktrack.LOCATION_UPDATE") return
@@ -61,7 +64,6 @@ class MainActivity : BridgeActivity() {
         super.onCreate(savedInstanceState)
         createNotificationChannels()
 
-        // Ask for POST_NOTIFICATIONS immediately on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -108,10 +110,14 @@ class MainActivity : BridgeActivity() {
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(NotificationManager::class.java)
+
+            // Remove the old DEFAULT channel — Samsung caches importance and NEVER
+            // downgrades it, so "tuktrack_online" stays dismissable forever.
+            // Deleting it forces a fresh creation at IMPORTANCE_LOW.
+            try { nm.deleteNotificationChannel("tuktrack_online") } catch (_: Exception) {}
+
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ONLINE, "TukTrack Online Status",
-                    // IMPORTANCE_LOW: persistent, no sound, cannot be dismissed on stock Android.
-                    // Samsung One UI also respects LOW for foreground services.
+                NotificationChannel(CHANNEL_ONLINE, "TukTrack GPS Ativo",
                     NotificationManager.IMPORTANCE_LOW).apply {
                     description          = "Mostra enquanto o motorista partilha localização"
                     setShowBadge(false)
@@ -132,6 +138,14 @@ class MainActivity : BridgeActivity() {
         }
     }
 
+    /**
+     * injectBridge — called on onStart and onResume AND after every page load.
+     *
+     * KEY: we now also post a delayed re-inject after 500 ms to handle the race
+     * where the JS app finishes rendering AFTER onResume fires (common on first launch
+     * with a Capacitor/React app). This ensures AndroidBridge is always on window
+     * by the time the driver taps GO ONLINE.
+     */
     private fun injectBridge() {
         try {
             val webView: WebView = bridge.webView
@@ -149,6 +163,16 @@ class MainActivity : BridgeActivity() {
                     view: WebView?, request: android.webkit.WebResourceRequest?
                 ) = orig?.shouldOverrideUrlLoading(view, request) ?: false
             }
+            // Delayed re-inject — covers the React first-render race condition
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
+                    webView.evaluateJavascript(
+                        "if(!window.__ANDROID_BRIDGE_READY__){" +
+                        "window.__ANDROID_BRIDGE_READY__=true;" +
+                        "window.dispatchEvent(new Event('androidBridgeReady'));}", null)
+                } catch (_: Exception) {}
+            }, 500)
         } catch (_: Exception) {}
     }
 
@@ -168,20 +192,28 @@ class MainActivity : BridgeActivity() {
 
     inner class AndroidBridge {
 
-        // ── 1. NON-DISMISSABLE FOREGROUND SERVICE NOTIFICATION ──────────────────
+        // ── 1. FOREGROUND SERVICE + NON-DISMISSABLE NOTIFICATION ────────────────
         /**
-         * Called by JS when driver presses the ONLINE button.
+         * Called by JS when the driver presses ONLINE.
          *
-         * KEY: saves driver_uid to SharedPreferences so LocationForegroundService
-         *      can write directly to Firestore via REST when the WebView is gone.
+         * IMPORTANT: We start the foreground service regardless of notification
+         * permission — the service MUST run for GPS to work. The notification
+         * simply won't show on Android 13+ if permission is denied, but GPS
+         * will still be shared.
+         *
+         * Saves driver_uid so the native service can write Firestore via REST
+         * when the app is killed and the WebView/JS SDK are gone.
          */
         @JavascriptInterface
         fun showForegroundNotification(title: String, message: String, shiftStartMs: Long = 0L) {
-            if (!hasNotificationPermission()) {
+            // Request notification permission if missing (Android 13+) — but don't block
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                !hasNotificationPermission()) {
                 ActivityCompat.requestPermissions(this@MainActivity,
                     arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATION)
-                return
+                // Fall through — still start the service
             }
+
             val realStart = if (shiftStartMs > 0) shiftStartMs else System.currentTimeMillis()
             getSharedPreferences("tuktrack", Context.MODE_PRIVATE).edit()
                 .putBoolean("driver_was_online", true)
@@ -201,17 +233,14 @@ class MainActivity : BridgeActivity() {
         fun hideForegroundNotification() {
             getSharedPreferences("tuktrack", Context.MODE_PRIVATE).edit()
                 .putBoolean("driver_was_online", false)
-                .remove("driver_uid")   // clear uid when going offline
+                .remove("driver_uid")
                 .apply()
             stopService(Intent(this@MainActivity, LocationForegroundService::class.java))
         }
 
         /**
-         * Called by JS to persist the driver's Firebase UID in SharedPreferences.
-         * LocationForegroundService reads this to write location via REST when the
-         * app is killed and the WebView / Firestore JS SDK are unavailable.
-         *
-         * Call this BEFORE showForegroundNotification (or at the same time).
+         * Saves the Firebase UID so the service can write to Firestore via REST
+         * when the app is killed. Call this right before showForegroundNotification.
          */
         @JavascriptInterface
         fun setDriverUid(uid: String) {
@@ -221,7 +250,7 @@ class MainActivity : BridgeActivity() {
                 .apply()
         }
 
-        // ── 2. ALERT NOTIFICATIONS (SOS, shift, GPS, messages) ──────────────────
+        // ── 2. ALERT NOTIFICATIONS ───────────────────────────────────────────────
         @JavascriptInterface
         fun showAlertNotification(title: String, message: String, notifId: Int) {
             if (!hasNotificationPermission()) return
@@ -261,20 +290,19 @@ class MainActivity : BridgeActivity() {
         // ── 4. BACKGROUND LOCATION ───────────────────────────────────────────────
         @JavascriptInterface
         fun openBackgroundLocationSettings() {
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.fromParts("package", packageName, null)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            startActivity(intent)
+            })
         }
 
         @JavascriptInterface
         fun requestBackgroundLocation(): Boolean {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
-            val bg = ContextCompat.checkSelfPermission(this@MainActivity,
+            val granted = ContextCompat.checkSelfPermission(this@MainActivity,
                 Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
-            if (!bg) openBackgroundLocationSettings()
-            return bg
+            if (!granted) openBackgroundLocationSettings()
+            return granted
         }
 
         @JavascriptInterface
