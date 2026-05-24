@@ -77,6 +77,8 @@ export default function DriverDashboard() {
   const [localActiveTripId, setLocalActiveTripId] = useState<string | null>(userData?.activeTripId || null);
   const [todayStats, setTodayStats] = useState({ count: 0, earnings: 0 });
   const [cancelTimer, setCancelTimer] = useState<number | null>(null);
+  const [showCancelReasonModal, setShowCancelReasonModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
   const [activeTrip, setActiveTrip] = useState<any | null>(null);
   const [assignedVehicle, setAssignedVehicle] = useState<any | null>(null);
   const [showMap, setShowMap] = useState(false);
@@ -544,14 +546,14 @@ export default function DriverDashboard() {
         const diff = (now - createdTime) / 1000;
         
         if (diff < 20 && data.status === 'active') {
-          setCancelTimer(Math.ceil(20 - diff));
+          setCancelTimer(Math.ceil(60 - diff));
           const interval = setInterval(() => {
             const currentDiff = (Date.now() - createdTime) / 1000;
             if (currentDiff >= 20) {
               setCancelTimer(null);
               clearInterval(interval);
             } else {
-              setCancelTimer(Math.ceil(20 - currentDiff));
+              setCancelTimer(Math.ceil(60 - currentDiff));
             }
           }, 1000);
           return () => clearInterval(interval);
@@ -568,15 +570,24 @@ export default function DriverDashboard() {
 
   const handleTripStarted = (tripId: string) => {
     setLocalActiveTripId(tripId);
-    setCancelTimer(20);
+    setCancelTimer(60);
   };
 
-  const handleCancelTrip = async () => {
+  const handleCancelTrip = () => {
+    // Show reason modal before cancelling
+    setCancelReason('');
+    setShowCancelReasonModal(true);
+  };
+
+  const confirmCancelTrip = async (reason: string) => {
     if (!user || !activeTrip) return;
+    setShowCancelReasonModal(false);
     setIsActionLoading(true);
     try {
       await updateDoc(doc(db, 'trips', activeTrip.id), {
-        status: 'cancelled'
+        status: 'cancelled',
+        cancelReason: reason || 'Sem motivo indicado',
+        cancelledAt: new Date().toISOString(),
       });
       await updateDoc(doc(db, 'users', user.uid), {
         activeTripId: '',
@@ -584,7 +595,7 @@ export default function DriverDashboard() {
       });
       setLocalActiveTripId(null);
       setActiveTrip(null);
-      alert('Viagem Cancelada.');
+      setCancelTimer(null);
     } catch (err: any) {
       handleFirestoreError(err, 'update', `trips/${activeTrip.id}`);
     } finally {
@@ -1796,6 +1807,42 @@ export default function DriverDashboard() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Cancel Trip Reason Modal */}
+      {showCancelReasonModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="text-center mb-4">
+              <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-3">
+                <span className="text-2xl">❌</span>
+              </div>
+              <h3 className="text-xl font-black text-navy">Cancelar Viagem</h3>
+              <p className="text-sm text-slate-400 mt-1">Indique o motivo do cancelamento</p>
+            </div>
+            <textarea
+              className="w-full border border-slate-200 rounded-2xl p-3 text-sm text-navy resize-none focus:outline-none focus:ring-2 focus:ring-red-300"
+              rows={3}
+              placeholder="Motivo do cancelamento..."
+              value={cancelReason}
+              onChange={e => setCancelReason(e.target.value)}
+            />
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={() => setShowCancelReasonModal(false)}
+                className="flex-1 h-12 rounded-2xl border border-slate-200 text-slate-500 font-bold text-sm"
+              >
+                Voltar
+              </button>
+              <button
+                onClick={() => confirmCancelTrip(cancelReason)}
+                className="flex-1 h-12 rounded-2xl bg-red-500 text-white font-black text-sm"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Background Location Permission Modal */}
       <AnimatePresence>
