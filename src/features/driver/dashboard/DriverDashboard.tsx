@@ -186,8 +186,34 @@ export default function DriverDashboard() {
       limit(3)
     );
 
+    const pushedNotifIds = new Set<string>();
     const unsubNotify = onSnapshot(notifyQuery, (snapshot) => {
-      setNotifications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      setNotifications(docs);
+
+      // Push each NEW notification to the Android notification bar
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const data = change.doc.data() as any;
+          const docId = change.doc.id;
+          if (!pushedNotifIds.has(docId)) {
+            pushedNotifIds.add(docId);
+            const numId = 3000 + (Math.abs(
+              docId.split('').reduce((a: number, c: string) => a + c.charCodeAt(0), 0)
+            ) % 5000);
+            try {
+              const bridge = (window as any).AndroidBridge;
+              if (bridge?.showAlertNotification) {
+                bridge.showAlertNotification(
+                  data.title || 'TukTrack',
+                  data.message || data.body || '',
+                  numId
+                );
+              }
+            } catch (e) {}
+          }
+        }
+      });
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'notifications');
     });
@@ -465,8 +491,9 @@ export default function DriverDashboard() {
         const shiftData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
         // Only show modal when shift STARTS this session — not on every app open
         const shiftSeenKey = 'tuktrack_shift_seen_' + shiftData.id;
-        if (!prevActiveShiftRef.current && !sessionStorage.getItem(shiftSeenKey)) {
-          sessionStorage.setItem(shiftSeenKey, 'true');
+        // localStorage persists when app is killed/reopened — prevents repeated modal
+        if (!prevActiveShiftRef.current && !localStorage.getItem(shiftSeenKey) && !isOnlineRef.current) {
+          localStorage.setItem(shiftSeenKey, 'true');
           setShowShiftStartModal(true);
         }
         prevActiveShiftRef.current = shiftData;
@@ -1019,19 +1046,17 @@ export default function DriverDashboard() {
   // showForegroundNotification() is a @JavascriptInterface method injected by
   // the fixed MainActivity. It creates an ongoing (non-dismissable) notification
   // in the Android status bar. Tapping it returns the driver to the dashboard.
-  // shiftStartTime: when the manager started the shift — used for live timer in notification
   const showOnlineNotification = async (shiftStartTime?: Date) => {
     const bridge = (window as any).AndroidBridge;
     if (bridge?.showForegroundNotification) {
       try {
         const shiftStartMs = shiftStartTime ? shiftStartTime.getTime() : Date.now();
-        // Pass shiftStartMs as 3rd argument so the native service can show elapsed time
         bridge.showForegroundNotification(
           '🟢 TukTrack — Em Serviço',
           'A partilhar localização em tempo real. Toque para abrir.',
           shiftStartMs
         );
-        console.log('[Notif] Foreground service started with shift timer:', new Date(shiftStartMs));
+        console.log('[Notif] Foreground service started, timer from:', new Date(shiftStartMs));
         return;
       } catch (e) {
         console.warn('[Bridge] showForegroundNotification failed:', e);
