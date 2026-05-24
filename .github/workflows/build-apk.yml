@@ -28,7 +28,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install npm dependencies
-        run: npm install
+        run: npm install && npm install @capacitor/app capacitor-native-settings --save-exact || true
 
       - name: Build web app
         run: npm run build
