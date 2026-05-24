@@ -25,13 +25,14 @@ class MainActivity : BridgeActivity() {
         private const val REQUEST_FINE_LOCATION       = 1000
         private const val REQUEST_BACKGROUND_LOCATION = 1001
         private const val REQUEST_NOTIFICATION        = 1002
-        private const val CHANNEL_ID                  = "tuktrack_online"
-        private const val NOTIFICATION_ID             = 1001
+        private const val CHANNEL_ONLINE              = "tuktrack_online"
+        private const val CHANNEL_ALERTS              = "tuktrack_alerts"
+        private const val NOTIFICATION_ONLINE_ID      = 1001
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        createNotificationChannel()
+        createNotificationChannels()
     }
 
     override fun onStart() {
@@ -39,190 +40,193 @@ class MainActivity : BridgeActivity() {
         injectBridge()
     }
 
-    // ── Create the notification channel (required Android 8+) ────────────────
-    private fun createNotificationChannel() {
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "TukTrack Online Status",
-                NotificationManager.IMPORTANCE_LOW  // no sound, shows in bar
-            ).apply {
-                description = "Shows when the driver is actively sharing location"
-                setShowBadge(false)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            val nm = getSystemService(NotificationManager::class.java)
+
+            // Channel 1: persistent "driver is online" notification (no sound)
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL_ONLINE, "TukTrack Online Status",
+                    NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "Shows while the driver is sharing location"
+                    setShowBadge(false)
+                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                }
+            )
+
+            // Channel 2: alert notifications (SOS, shift start, GPS warnings)
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL_ALERTS, "TukTrack Alertas",
+                    NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "SOS, turno, GPS e alertas operacionais"
+                    setShowBadge(true)
+                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                    enableVibration(true)
+                }
+            )
         }
     }
 
-    // ── Inject AndroidBridge after every page load ────────────────────────────
     private fun injectBridge() {
         try {
             val webView: WebView = bridge.webView
             webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
-
             val originalClient = webView.webViewClient
             webView.webViewClient = object : android.webkit.WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     view?.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
                     view?.evaluateJavascript(
-                        "window.__ANDROID_BRIDGE_READY__ = true; " +
-                        "window.dispatchEvent(new Event('androidBridgeReady'));",
-                        null
-                    )
+                        "window.__ANDROID_BRIDGE_READY__=true;" +
+                        "window.dispatchEvent(new Event('androidBridgeReady'));", null)
                 }
                 override fun shouldOverrideUrlLoading(
-                    view: WebView?,
-                    request: android.webkit.WebResourceRequest?
-                ): Boolean {
-                    return originalClient?.shouldOverrideUrlLoading(view, request) ?: false
-                }
+                    view: WebView?, request: android.webkit.WebResourceRequest?
+                ) = originalClient?.shouldOverrideUrlLoading(view, request) ?: false
             }
-        } catch (e: Exception) {
-            // Bridge not ready yet
+        } catch (e: Exception) {}
+    }
+
+    private fun hasNotificationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return ContextCompat.checkSelfPermission(this,
+                Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         }
+        return true
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ActivityCompat.requestPermissions(this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATION)
+        }
+    }
+
+    private fun buildTapIntent(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
     inner class AndroidBridge {
 
-        // ── 1. PERSISTENT STATUS BAR NOTIFICATION ────────────────────────────────
-        // Called by JS when driver goes ONLINE.
-        // Shows an ongoing notification (cannot be swiped away).
-        // Tapping it brings driver back to the app.
+        // ── ONLINE status bar notification (persistent, no swipe) ─────────────
         @JavascriptInterface
         fun showForegroundNotification(title: String, message: String) {
-            // Android 13+ requires POST_NOTIFICATIONS permission at runtime
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (ContextCompat.checkSelfPermission(
-                        this@MainActivity,
-                        Manifest.permission.POST_NOTIFICATIONS
-                    ) != PackageManager.PERMISSION_GRANTED
-                ) {
-                    ActivityCompat.requestPermissions(
-                        this@MainActivity,
-                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                        REQUEST_NOTIFICATION
-                    )
-                    // Try again after a short delay to allow the user to grant
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        showForegroundNotification(title, message)
-                    }, 3000)
-                    return
-                }
+            if (!hasNotificationPermission()) { requestNotificationPermission(); return }
+
+            // Start the background location service so GPS keeps running
+            val svcIntent = Intent(this@MainActivity, LocationForegroundService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(svcIntent)
+            } else {
+                startService(svcIntent)
             }
 
-            // Tap notification → open/focus the app
-            val intent = Intent(this@MainActivity, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            val pendingIntent = PendingIntent.getActivity(
-                this@MainActivity, 0, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            val notification = NotificationCompat.Builder(this@MainActivity, CHANNEL_ID)
+            val notification = NotificationCompat.Builder(this@MainActivity, CHANNEL_ONLINE)
                 .setContentTitle(title)
                 .setContentText(message)
                 .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)           // cannot be swiped away while online
+                .setContentIntent(buildTapIntent())
+                .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .build()
 
             try {
                 NotificationManagerCompat.from(this@MainActivity)
-                    .notify(NOTIFICATION_ID, notification)
-            } catch (e: SecurityException) {
-                // Permission not granted yet — will retry after user grants
-            }
+                    .notify(NOTIFICATION_ONLINE_ID, notification)
+            } catch (e: SecurityException) {}
         }
 
-        // Called by JS when driver goes OFFLINE — removes the notification
         @JavascriptInterface
         fun hideForegroundNotification() {
-            NotificationManagerCompat.from(this@MainActivity).cancel(NOTIFICATION_ID)
+            NotificationManagerCompat.from(this@MainActivity).cancel(NOTIFICATION_ONLINE_ID)
+            // Stop the background GPS service
+            stopService(Intent(this@MainActivity, LocationForegroundService::class.java))
         }
 
-        // ── 2. "Display over other apps" ─────────────────────────────────────────
+        // ── ALERT notifications (SOS, shift, GPS, manager messages) ──────────
+        // Call this from JS for any event that needs to appear in the notification bar
+        // even when the app is in the background.
+        // notifId: unique int per notification type (e.g. 2=SOS, 3=shift, 4=GPS)
+        @JavascriptInterface
+        fun showAlertNotification(title: String, message: String, notifId: Int) {
+            if (!hasNotificationPermission()) { requestNotificationPermission(); return }
+
+            val notification = NotificationCompat.Builder(this@MainActivity, CHANNEL_ALERTS)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentIntent(buildTapIntent())
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .build()
+
+            try {
+                NotificationManagerCompat.from(this@MainActivity)
+                    .notify(notifId, notification)
+            } catch (e: SecurityException) {}
+        }
+
+        @JavascriptInterface
+        fun dismissNotification(notifId: Int) {
+            NotificationManagerCompat.from(this@MainActivity).cancel(notifId)
+        }
+
+        // ── Overlay / location permissions (unchanged) ────────────────────────
         @JavascriptInterface
         fun openOverlaySettings() {
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:${packageName}")
-            )
-            startActivity(intent)
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${packageName}")))
         }
 
         @JavascriptInterface
-        fun isOverlayGranted(): Boolean {
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                Settings.canDrawOverlays(this@MainActivity)
-            } else true
-        }
+        fun isOverlayGranted(): Boolean =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                Settings.canDrawOverlays(this@MainActivity) else true
 
-        // ── 3. Background location ("Allow all the time") ────────────────────────
         @JavascriptInterface
         fun requestBackgroundLocation(): Boolean {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
-
-            val fineGranted = ContextCompat.checkSelfPermission(
-                this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-            if (!fineGranted) {
-                ActivityCompat.requestPermissions(
-                    this@MainActivity,
-                    arrayOf(
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    ),
-                    REQUEST_FINE_LOCATION
-                )
+            val fine = ContextCompat.checkSelfPermission(this@MainActivity,
+                Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (!fine) {
+                ActivityCompat.requestPermissions(this@MainActivity,
+                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION),
+                    REQUEST_FINE_LOCATION)
                 return false
             }
-
-            val bgGranted = ContextCompat.checkSelfPermission(
-                this@MainActivity, Manifest.permission.ACCESS_BACKGROUND_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-            if (!bgGranted) {
-                ActivityCompat.requestPermissions(
-                    this@MainActivity,
-                    arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
-                    REQUEST_BACKGROUND_LOCATION
-                )
-            }
-            return bgGranted
+            val bg = ContextCompat.checkSelfPermission(this@MainActivity,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (!bg) ActivityCompat.requestPermissions(this@MainActivity,
+                arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+                REQUEST_BACKGROUND_LOCATION)
+            return bg
         }
 
         @JavascriptInterface
         fun isBackgroundLocationGranted(): Boolean {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
-            return ContextCompat.checkSelfPermission(
-                this@MainActivity, Manifest.permission.ACCESS_BACKGROUND_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
+            return ContextCompat.checkSelfPermission(this@MainActivity,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
         }
 
-        // ── 4. Open app settings pages ────────────────────────────────────────────
         @JavascriptInterface
         fun openLocationSettings() {
-            val intent = Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:${packageName}")
-            )
-            startActivity(intent)
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:${packageName}")))
         }
 
         @JavascriptInterface
         fun openAppSettings() {
-            val intent = Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:${packageName}")
-            )
-            startActivity(intent)
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:${packageName}")))
         }
     }
 }
