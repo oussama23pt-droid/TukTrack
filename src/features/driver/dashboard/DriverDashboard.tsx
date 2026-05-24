@@ -221,12 +221,9 @@ export default function DriverDashboard() {
     return () => unsubNotify();
   }, [userData?.managerId]);
 
-  // ── BACKGROUND GPS → FIRESTORE ──────────────────────────────────────────────
-  // LocationForegroundService sends coords via BroadcastReceiver every 4s.
-  // MainActivity forwards them as 'nativeLocationUpdate' CustomEvent.
-  // This keeps the manager map updating even when the driver's screen is off.
+  // Background GPS → Firestore bridge
   useEffect(() => {
-    const handleNativeLoc = async (e: Event) => {
+    const onNativeLoc = async (e: Event) => {
       const { latitude: lat, longitude: lng, accuracy } = (e as CustomEvent).detail ?? {};
       if (!lat || !lng) return;
       setCurrentCoords({ lat, lng });
@@ -245,10 +242,10 @@ export default function DriverDashboard() {
           locationAccuracy: accuracy ?? null,
           lastUpdated: serverTimestamp(),
         });
-      } catch (err) { console.error('[NativeGPS] Firestore:', err); }
+      } catch (err) { console.error('[NativeGPS]', err); }
     };
-    window.addEventListener('nativeLocationUpdate', handleNativeLoc);
-    return () => window.removeEventListener('nativeLocationUpdate', handleNativeLoc);
+    window.addEventListener('nativeLocationUpdate', onNativeLoc);
+    return () => window.removeEventListener('nativeLocationUpdate', onNativeLoc);
   }, [user?.uid]);
 
   const [showStopsList, setShowStopsList] = useState(false);
@@ -1116,34 +1113,24 @@ export default function DriverDashboard() {
     } catch (e) {}
   };
 
-  // ── FOREGROUND NOTIFICATION ─────────────────────────────────────────────────
-  // ONLY uses AndroidBridge.showForegroundNotification() in the APK.
-  // This starts LocationForegroundService which shows a STICKY (non-dismissable)
-  // notification with a live elapsed timer.
-  // The Web Notification API fallback is intentionally NOT used here — it cannot
-  // be made non-dismissable and would create the duplicate notification you saw.
   const showOnlineNotification = async (shiftStartTime?: Date) => {
     const bridge = (window as any).AndroidBridge;
     if (bridge?.showForegroundNotification) {
       try {
-        const shiftStartMs = shiftStartTime
-          ? shiftStartTime.getTime()
-          : Date.now();
+        const shiftStartMs = shiftStartTime ? shiftStartTime.getTime() : Date.now();
         bridge.showForegroundNotification(
           '🟢 TukTrack — Em Serviço',
           'A partilhar localização em tempo real. Toque para abrir.',
           shiftStartMs
         );
-        return; // ← always return here; never fall through to Web API
+        console.log('[Notif] Foreground service started, timer from:', new Date(shiftStartMs));
+        return;
       } catch (e) {
         console.warn('[Bridge] showForegroundNotification failed:', e);
-        // Still don't fall through — a second dismissable notification
-        // would confuse the driver. The service will retry automatically.
       }
     }
-    // Only reaches here in a pure browser / web environment (not APK)
-    // In that case we silently skip — no duplicate notification.
   };
+
 
   const hideOnlineNotification = () => {
     const bridge = (window as any).AndroidBridge;
@@ -1892,28 +1879,27 @@ export default function DriverDashboard() {
                   onClick={() => {
                     setShowBackgroundPermissionModal(false);
                     const bridge = (window as any).AndroidBridge;
-                    if (bridge?.requestBackgroundLocation) {
-                      bridge.requestBackgroundLocation();
-                      let checks = 0;
-                      const poll = setInterval(() => {
-                        checks++;
-                        if (bridge.isBackgroundLocationGranted?.()) {
-                          backgroundLocationGranted.current = true;
-                          localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                          clearInterval(poll);
-                        }
-                        if (checks >= 40) {
-                          clearInterval(poll);
-                          bridge.openLocationSettings?.();
-                          backgroundLocationGranted.current = true;
-                          localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                        }
-                      }, 500);
-                    } else {
-                      backgroundLocationGranted.current = true;
-                      localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                      alert('Vá a: Definições → Aplicações → TukTrack → Permissões → Localização → Permitir sempre');
+
+                    // openBackgroundLocationSettings() goes DIRECTLY to the app's
+                    // Location permission page in Android Settings where the driver
+                    // sees "Allow all the time" with one tap — no intermediate dialogs.
+                    if (bridge?.openBackgroundLocationSettings) {
+                      bridge.openBackgroundLocationSettings();
+                    } else if (bridge?.openLocationSettings) {
+                      bridge.openLocationSettings();
                     }
+
+                    // Poll after driver returns from Settings
+                    let checks = 0;
+                    const poll = setInterval(() => {
+                      checks++;
+                      const granted = bridge?.isBackgroundLocationGranted?.() ?? false;
+                      if (granted || checks >= 60) {
+                        clearInterval(poll);
+                        backgroundLocationGranted.current = true;
+                        localStorage.setItem('tuktrack_bg_location_granted', 'true');
+                      }
+                    }, 500);
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
                 >
