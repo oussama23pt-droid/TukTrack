@@ -165,7 +165,9 @@ export default function DriverDashboard() {
           console.error('Location request failed:', error);
           setLocationStatus('disabled');
           if (error.code === error.PERMISSION_DENIED) {
-            alert('Permissão de localização negada. Por favor, ative a localização nas Definições do seu telemóvel:\n\nDefinições → Aplicações → TukTrack → Permissões → Localização');
+            const bridge = (window as any).AndroidBridge;
+            if (bridge?.openLocationSettings) { bridge.openLocationSettings(); }
+            else if (bridge?.openAppSettings) { bridge.openAppSettings(); }
           }
         },
         { enableHighAccuracy: true, timeout: 10000 }
@@ -1898,9 +1900,17 @@ export default function DriverDashboard() {
                         }
                       }, 500);
                     } else {
+                      // Always open settings directly — never show a manual text alert
                       backgroundLocationGranted.current = true;
                       localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                      alert('Vá a: Definições → Aplicações → TukTrack → Permissões → Localização → Permitir sempre');
+                      try {
+                        // Try Capacitor way
+                        const { App } = await import('@capacitor/app');
+                        (App as any).openUrl({ url: 'android.settings.APPLICATION_DETAILS_SETTINGS' });
+                      } catch {
+                        // Final fallback: open settings via window location
+                        window.location.href = 'intent:#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;end';
+                      }
                     }
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
