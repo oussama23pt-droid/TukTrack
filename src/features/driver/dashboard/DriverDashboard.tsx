@@ -221,43 +221,34 @@ export default function DriverDashboard() {
     return () => unsubNotify();
   }, [userData?.managerId]);
 
-  // ── NATIVE LOCATION LISTENER ───────────────────────────────────────────────
-  // LocationForegroundService (Kotlin) sends GPS coords via BroadcastReceiver
-  // → MainActivity forwards them to WebView as 'nativeLocationUpdate' event.
-  // This runs even when the app is in background / screen is off.
+  // ── BACKGROUND GPS → FIRESTORE ──────────────────────────────────────────────
+  // LocationForegroundService sends coords via BroadcastReceiver every 4s.
+  // MainActivity forwards them as 'nativeLocationUpdate' CustomEvent.
+  // This keeps the manager map updating even when the driver's screen is off.
   useEffect(() => {
-    const handleNativeLocation = async (e: Event) => {
-      const { latitude: lat, longitude: lng, accuracy } = (e as CustomEvent).detail;
+    const handleNativeLoc = async (e: Event) => {
+      const { latitude: lat, longitude: lng, accuracy } = (e as CustomEvent).detail ?? {};
       if (!lat || !lng) return;
-
-      // Always update the map marker
       setCurrentCoords({ lat, lng });
       setLocationStatus('active');
       _store.latestCoords = { lat, lng };
-      if (_store.onCoordsUpdate) _store.onCoordsUpdate({ lat, lng });
-
-      // Throttle Firestore writes to max once per 5s
+      _store.onCoordsUpdate?.({ lat, lng });
       const uid = _store.uid || user?.uid;
       if (!uid || !_store.isOnline) return;
       const now = Date.now();
       if (now - _store.lastFirestoreWrite < 5000) return;
       _store.lastFirestoreWrite = now;
-
       try {
         await updateDoc(doc(db, 'users', uid), {
           location: { lat, lng, updatedAt: new Date().toISOString() },
-          currentLat: lat,
-          currentLng: lng,
+          currentLat: lat, currentLng: lng,
           locationAccuracy: accuracy ?? null,
           lastUpdated: serverTimestamp(),
         });
-      } catch (err) {
-        console.error('[NativeGPS] Firestore write failed:', err);
-      }
+      } catch (err) { console.error('[NativeGPS] Firestore:', err); }
     };
-
-    window.addEventListener('nativeLocationUpdate', handleNativeLocation);
-    return () => window.removeEventListener('nativeLocationUpdate', handleNativeLocation);
+    window.addEventListener('nativeLocationUpdate', handleNativeLoc);
+    return () => window.removeEventListener('nativeLocationUpdate', handleNativeLoc);
   }, [user?.uid]);
 
   const [showStopsList, setShowStopsList] = useState(false);
@@ -859,11 +850,9 @@ export default function DriverDashboard() {
             } else if (!backgroundLocationGranted.current) {
               setTimeout(() => setShowBackgroundPermissionModal(true), 800);
             }
-            // STEP 3: Persist online state for BootReceiver + show notification
+            // STEP 3: Show persistent status bar notification
             setAppBadge(1);
-            try {
-              (window as any).AndroidBridge?.setDriverOnlineState?.(true);
-            } catch (_) {}
+            try { (window as any).AndroidBridge?.setDriverOnlineState?.(true); } catch(_) {}
             showOnlineNotification(
               activeShift?.startedAt ? new Date(activeShift.startedAt) :
               activeShift?.createdAt ? new Date(activeShift.createdAt) :
@@ -944,9 +933,7 @@ export default function DriverDashboard() {
       });
       setIsOnline(false);
       hideOnlineNotification();
-      try {
-        (window as any).AndroidBridge?.setDriverOnlineState?.(false);
-      } catch (_) {}
+      try { (window as any).AndroidBridge?.setDriverOnlineState?.(false); } catch(_) {}
     setAppBadge(0);
     } catch (err: any) {
       handleFirestoreError(err, 'update', `users/${user.uid}`);
@@ -1129,36 +1116,33 @@ export default function DriverDashboard() {
     } catch (e) {}
   };
 
+  // ── FOREGROUND NOTIFICATION ─────────────────────────────────────────────────
+  // ONLY uses AndroidBridge.showForegroundNotification() in the APK.
+  // This starts LocationForegroundService which shows a STICKY (non-dismissable)
+  // notification with a live elapsed timer.
+  // The Web Notification API fallback is intentionally NOT used here — it cannot
+  // be made non-dismissable and would create the duplicate notification you saw.
   const showOnlineNotification = async (shiftStartTime?: Date) => {
     const bridge = (window as any).AndroidBridge;
     if (bridge?.showForegroundNotification) {
       try {
-        const shiftStartMs = shiftStartTime ? shiftStartTime.getTime() : Date.now();
+        const shiftStartMs = shiftStartTime
+          ? shiftStartTime.getTime()
+          : Date.now();
         bridge.showForegroundNotification(
           '🟢 TukTrack — Em Serviço',
           'A partilhar localização em tempo real. Toque para abrir.',
           shiftStartMs
         );
-        console.log('[Notif] Foreground service started, timer from:', new Date(shiftStartMs));
-        return;
+        return; // ← always return here; never fall through to Web API
       } catch (e) {
         console.warn('[Bridge] showForegroundNotification failed:', e);
+        // Still don't fall through — a second dismissable notification
+        // would confuse the driver. The service will retry automatically.
       }
     }
-    // Fallback: Web Notifications API (browser / web version)
-    if ('Notification' in window) {
-      let perm = Notification.permission;
-      if (perm === 'default') perm = await Notification.requestPermission();
-      if (perm === 'granted') {
-        new Notification('🟢 TukTrack — Em Serviço', {
-          body: 'A partilhar localização em tempo real. Toque para abrir.',
-          icon: '/pwa-192x192.png',
-          tag: 'tuktrack-online',
-          requireInteraction: true,
-          silent: true,
-        });
-      }
-    }
+    // Only reaches here in a pure browser / web environment (not APK)
+    // In that case we silently skip — no duplicate notification.
   };
 
   const hideOnlineNotification = () => {
