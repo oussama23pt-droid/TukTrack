@@ -6,92 +6,113 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.location.Location
 import android.os.Build
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
+import com.google.android.gms.location.*
 
-/**
- * ForegroundLocationService
- *
- * A true Android Foreground Service. When started, it posts a persistent,
- * non-dismissable notification in the status bar and keeps the app process
- * alive even when the driver switches to another app or locks the phone.
- *
- * The actual GPS tracking is handled by the Capacitor BackgroundGeolocation
- * plugin in the JS layer — this service's sole job is to:
- *   1. Show the sticky "Em Serviço" notification so Android won't kill the app.
- *   2. Keep the process alive as a foreground service.
- *
- * Started by MainActivity via AndroidBridge.startForegroundService()
- * Stopped by MainActivity via AndroidBridge.stopForegroundService()
- */
-class ForegroundLocationService : Service() {
+class LocationForegroundService : Service() {
 
     companion object {
-        const val CHANNEL_ID   = "tuktrack_foreground"
-        const val NOTIF_ID     = 9001
-        const val ACTION_START = "START"
-        const val ACTION_STOP  = "STOP"
+        private const val CHANNEL_ID      = "tuktrack_online"
+        private const val NOTIFICATION_ID = 1001
+    }
+
+    private lateinit var fusedClient: FusedLocationProviderClient
+    private lateinit var locationCallback: LocationCallback
+
+    override fun onCreate() {
+        super.onCreate()
+        fusedClient = LocationServices.getFusedLocationProviderClient(this)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        createChannel()
+        startForeground(NOTIFICATION_ID, buildNotification())
+        startLocationUpdates()
+        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_STOP -> {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            else -> {
-                createNotificationChannel()
-                startForeground(NOTIF_ID, buildNotification())
-            }
+    override fun onDestroy() {
+        super.onDestroy()
+        if (::locationCallback.isInitialized) {
+            fusedClient.removeLocationUpdates(locationCallback)
         }
-        // START_STICKY: if Android kills the service under memory pressure,
-        // it will restart it automatically — keeping the driver "online".
-        return START_STICKY
     }
 
     private fun buildNotification(): Notification {
-        // Tapping the notification reopens the app
-        val openAppIntent = packageManager
-            .getLaunchIntentForPackage(packageName)
-            ?.apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP }
-
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, openAppIntent,
+        val tapIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("🟢 TukTrack — Em Serviço")
-            .setContentText("A partilhar localização em segundo plano.")
-            .setSmallIcon(R.drawable.ic_stat_icon)
-            .setColor(0xFFF59E0B.toInt())          // amber brand colour
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)                       // cannot be swiped away
-            .setSilent(true)                        // no sound/vibration
+            .setContentTitle("🟢 TukTrack — Online")
+            .setContentText("A partilhar localização em tempo real. Toque para abrir.")
+            .setSmallIcon(R.drawable.ic_stat_icon)   // custom white icon
+            .setColor(0xFFF59E0B.toInt())             // amber
+            .setContentIntent(tapIntent)
+            .setOngoing(true)                          // CANNOT be swiped away
+            .setSilent(true)                           // no sound
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setForegroundServiceBehavior(
-                NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE
-            )
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 
-    private fun createNotificationChannel() {
+    private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "TukTrack Serviço Ativo",
-                NotificationManager.IMPORTANCE_LOW   // LOW = no sound, shows in bar
+                "TukTrack Online Status",
+                NotificationManager.IMPORTANCE_LOW    // no sound, shows in bar
             ).apply {
-                description = "Notificação persistente enquanto o motorista está online"
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+    }
+
+    private fun startLocationUpdates() {
+        val request = LocationRequest.Builder(
+            Priority.PRIORITY_HIGH_ACCURACY, 5000L
+        ).apply {
+            setMinUpdateIntervalMillis(3000L)
+            setWaitForAccurateLocation(false)
+        }.build()
+
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                val loc: Location = result.lastLocation ?: return
+                broadcastLocation(loc.latitude, loc.longitude, loc.accuracy)
+            }
+        }
+
+        try {
+            fusedClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+        } catch (e: SecurityException) {
+            stopSelf()
+        }
+    }
+
+    private fun broadcastLocation(lat: Double, lng: Double, accuracy: Float) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try {
+                sendBroadcast(Intent("com.tuktrack.LOCATION_UPDATE").apply {
+                    putExtra("lat", lat)
+                    putExtra("lng", lng)
+                    putExtra("accuracy", accuracy)
+                    setPackage(packageName)
+                })
+            } catch (e: Exception) {}
         }
     }
 }
