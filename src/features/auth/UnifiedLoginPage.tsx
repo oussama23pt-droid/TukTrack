@@ -313,7 +313,6 @@ export default function UnifiedLoginPage() {
       <div className="flex min-h-screen flex-col bg-slate-50 items-center justify-center">
         <div className="w-12 h-12 border-4 border-amber border-t-transparent rounded-full animate-spin mb-4" />
         <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">A entrar...</p>
-        </motion.div>
       </div>
     );
   }
