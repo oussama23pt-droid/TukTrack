@@ -4,15 +4,13 @@ const config: CapacitorConfig = {
   appId: 'com.tuktrack.app',
   appName: 'TukTrack',
   webDir: 'dist',
-  server: {
-    url: 'https://tuk-track.vercel.app',
-    cleartext: true,
-    androidScheme: 'https',
-  },
+  // NO server.url — app loads from bundled dist/ folder inside APK
+  // This is required for Capacitor plugins (background location, notifications) to work
   android: {
     allowMixedContent: true,
     captureInput: true,
     webContentsDebuggingEnabled: false,
+    backgroundColor: '#ffffff',
   },
   plugins: {
     BackgroundGeolocation: {
