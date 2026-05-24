@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Home, Users, Map as MapIcon, BarChart, Settings, LogOut, Shield, Briefcase, Activity, CreditCard, Menu, X, Lock, Timer as TimerIcon, Download } from 'lucide-react';
+import { Home, Users, Map as MapIcon, BarChart, Settings, LogOut, Shield, Briefcase, Activity, CreditCard, Menu, X, Lock, Timer as TimerIcon, Download, MessageCircle } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { cn } from '../lib/utils';
 import { useAuth } from '../features/auth/AuthContext';
@@ -96,11 +96,13 @@ export default function DashboardLayout({ children, role }: { children: React.Re
     { icon: MapIcon, label: t('map'), path: '/manager/map' },
     { icon: BarChart, label: t('reports'), path: '/manager/reports' },
     { icon: CreditCard, label: t('subscription'), path: '/manager/billing' },
+    { icon: MessageCircle, label: 'Mensagens', path: '/manager/messages' },
     { icon: Settings, label: t('settings'), path: '/manager/settings' },
   ] : [
     { icon: Home, label: t('home'), path: '/driver/dashboard' },
     { icon: MapIcon, label: t('trips_routes'), path: '/driver/trips' },
     { icon: BarChart, label: t('earnings'), path: '/driver/earnings' },
+    { icon: MessageCircle, label: 'Mensagens', path: '/driver/messages' },
     { icon: Settings, label: t('settings'), path: '/driver/settings' },
   ];
 
