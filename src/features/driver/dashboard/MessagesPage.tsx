@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, addDoc, onSnapshot, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, query, where, orderBy, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import { useAuth } from '../../auth/AuthContext';
 import { Send, MessageCircle } from 'lucide-react';
@@ -26,10 +26,15 @@ export default function MessagesPage() {
   useEffect(() => {
     if (!userData?.managerId) return;
 
+    // 7-day history filter
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
     const q = query(
       collection(db, 'messages'),
       where('managerId', '==', userData.managerId),
       where('driverUid', '==', user.uid),
+      where('createdAt', '>=', Timestamp.fromDate(sevenDaysAgo)),
       orderBy('createdAt', 'asc')
     );
 
@@ -44,13 +49,18 @@ export default function MessagesPage() {
           // Only notify if the message is from someone else
           if (msg.senderId !== user?.uid) {
             try {
+              // Try AndroidBridge first
               const bridge = (window as any).AndroidBridge;
               if (bridge?.showAlertNotification) {
-                bridge.showAlertNotification(
-                  `💬 ${msg.senderName}`,
-                  msg.text,
-                  7000 + (msgs.length % 100)
-                );
+                bridge.showAlertNotification(`💬 ${msg.senderName}`, msg.text, 7000);
+              }
+              // Also use Web Notifications API (works in Capacitor APK)
+              if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification(`💬 ${msg.senderName}`, {
+                  body: msg.text,
+                  icon: '/pwa-192x192.png',
+                  tag: 'tuktrack-message',
+                });
               }
             } catch (e) {}
           }
