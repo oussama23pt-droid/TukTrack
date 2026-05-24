@@ -613,50 +613,6 @@ export default function DriverDashboard() {
     return () => unsub();
   }, [user]);
 
-  // ── FOREGROUND NOTIFICATION via AndroidBridge ──────────────────────────────
-  // Shows a persistent notification in the Android status bar while online.
-  // Uses the JavascriptInterface injected by the fixed MainActivity.kt.
-  // Falls back to Web Notification API if AndroidBridge is unavailable.
-  const showOnlineNotification = async () => {
-    const bridge = (window as any).AndroidBridge;
-
-    // Primary: AndroidBridge native notification (works in APK background)
-    if (bridge?.showForegroundNotification) {
-      try {
-        bridge.showForegroundNotification(
-          '🟢 TukTrack — Online',
-          'A partilhar localização em tempo real. Toque para abrir a aplicação.'
-        );
-        return;
-      } catch (e) {
-        console.warn('[Bridge] showForegroundNotification failed:', e);
-      }
-    }
-
-    // Fallback: Web Notification API (works on web / when bridge unavailable)
-    if ('Notification' in window) {
-      let permission = Notification.permission;
-      if (permission === 'default') {
-        permission = await Notification.requestPermission();
-      }
-      if (permission === 'granted') {
-        new Notification('🟢 TukTrack — Online', {
-          body: 'A partilhar localização em tempo real. Toque para abrir a aplicação.',
-          icon: '/icons/icon-192x192.png',
-          tag: 'tuktrack-online',
-          silent: true,
-        });
-      }
-    }
-  };
-
-  const hideOnlineNotification = () => {
-    const bridge = (window as any).AndroidBridge;
-    if (bridge?.hideForegroundNotification) {
-      try { bridge.hideForegroundNotification(); } catch (e) {}
-    }
-  };
-
   const startBackgroundLocation = (): boolean => {
     if (!(window as any).median?.backgroundLocation) return false;
     try {
@@ -809,14 +765,13 @@ export default function DriverDashboard() {
             setIsOnline(true);
             setLocationStatus('active');
 
-            // STEP 2: Request permissions sequentially AFTER tracking starts
-            // Always show — works in APK (AndroidBridge) and web fallback
+            // STEP 2: Request permissions — always show regardless of platform
             if (!overlayPermissionGranted.current) {
               setTimeout(() => setShowOverlayPermissionModal(true), 800);
             } else if (!backgroundLocationGranted.current) {
               setTimeout(() => setShowBackgroundPermissionModal(true), 800);
             }
-            // STEP 3: Show persistent foreground notification via AndroidBridge
+            // STEP 3: Show persistent status bar notification
             showOnlineNotification();
           } catch (err) {
             console.error('Failed to update online status:', err);
@@ -1056,36 +1011,43 @@ export default function DriverDashboard() {
     }
   };
 
-  // ─── Persistent notification in Android notification bar ─────────────────────
-  // Uses Median's OneSignal bridge to show/hide a sticky notification
-  const showOnlineNotification = () => {
-    // Show persistent notification via Median OneSignal bridge
-    if ((window as any).median?.onesignal) {
+  // ─── Persistent notification via AndroidBridge (MainActivity.kt) ─────────────
+  // showForegroundNotification() is a @JavascriptInterface method injected by
+  // the fixed MainActivity. It creates an ongoing (non-dismissable) notification
+  // in the Android status bar. Tapping it returns the driver to the dashboard.
+  const showOnlineNotification = async () => {
+    const bridge = (window as any).AndroidBridge;
+    if (bridge?.showForegroundNotification) {
       try {
-        (window as any).median.onesignal.sendTag('driver_status', 'online');
-      } catch(e) {}
+        bridge.showForegroundNotification(
+          '🟢 TukTrack — Online',
+          'A partilhar localização em tempo real. Toque para abrir.'
+        );
+        return;
+      } catch (e) {
+        console.warn('[Bridge] showForegroundNotification failed:', e);
+      }
     }
-    // Fallback: use Web Notifications API (works in PWA/browser)
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('TukTrack — Online', {
-        body: 'A partilhar localizacao em tempo real.',
-        icon: '/pwa-192x192.png',
-        tag: 'tuktrack-online', // tag keeps it as ONE notification (replaces itself)
-        requireInteraction: true, // stays until dismissed
-        silent: true,
-      });
-    } else if ('Notification' in window && Notification.permission !== 'denied') {
-      Notification.requestPermission().then(perm => {
-        if (perm === 'granted') showOnlineNotification();
-      });
+    // Fallback: Web Notifications API (browser / web version)
+    if ('Notification' in window) {
+      let perm = Notification.permission;
+      if (perm === 'default') perm = await Notification.requestPermission();
+      if (perm === 'granted') {
+        new Notification('🟢 TukTrack — Online', {
+          body: 'A partilhar localização em tempo real. Toque para abrir.',
+          icon: '/pwa-192x192.png',
+          tag: 'tuktrack-online',
+          requireInteraction: true,
+          silent: true,
+        });
+      }
     }
   };
 
   const hideOnlineNotification = () => {
-    if ((window as any).median?.onesignal) {
-      try {
-        (window as any).median.onesignal.deleteTag('driver_status');
-      } catch(e) {}
+    const bridge = (window as any).AndroidBridge;
+    if (bridge?.hideForegroundNotification) {
+      try { bridge.hideForegroundNotification(); } catch (e) {}
     }
   };
 
@@ -1746,11 +1708,9 @@ export default function DriverDashboard() {
                 <button
                   onClick={async () => {
                     setShowOverlayPermissionModal(false);
-                    // Use AndroidBridge (from fixed MainActivity.kt)
                     const bridge = (window as any).AndroidBridge;
                     if (bridge?.openOverlaySettings) {
                       bridge.openOverlaySettings();
-                      // Poll until granted then proceed
                       let checks = 0;
                       const poll = setInterval(() => {
                         checks++;
@@ -1772,7 +1732,6 @@ export default function DriverDashboard() {
                         }
                       }, 500);
                     } else {
-                      // Fallback for non-Android / web
                       overlayPermissionGranted.current = true;
                       localStorage.setItem('tuktrack_overlay_granted', 'true');
                       if (!backgroundLocationGranted.current) {
@@ -1833,9 +1792,6 @@ export default function DriverDashboard() {
                     setShowBackgroundPermissionModal(false);
                     const bridge = (window as any).AndroidBridge;
                     if (bridge?.requestBackgroundLocation) {
-                      // Fixed MainActivity enforces the two-step flow:
-                      // 1. Grant ACCESS_FINE_LOCATION first
-                      // 2. Then ACCESS_BACKGROUND_LOCATION → shows "Allow all the time"
                       bridge.requestBackgroundLocation();
                       let checks = 0;
                       const poll = setInterval(() => {
@@ -1847,7 +1803,6 @@ export default function DriverDashboard() {
                         }
                         if (checks >= 40) {
                           clearInterval(poll);
-                          // Fallback: open app settings page
                           bridge.openLocationSettings?.();
                           backgroundLocationGranted.current = true;
                           localStorage.setItem('tuktrack_bg_location_granted', 'true');
