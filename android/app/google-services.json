@@ -1,0 +1,68 @@
+{
+  "project_info": {
+    "project_number": "215697767558",
+    "project_id": "tuktrack-19377",
+    "storage_bucket": "tuktrack-19377.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:215697767558:android:001adf031f6802f72ca507",
+        "android_client_info": {
+          "package_name": "co.median.android.bneaddk"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "215697767558-s9st6ff87482t00f64jkr77rncr15lqj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCoYMDfLYGYabvvRwXvQQAGbt9Is-CABVI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "215697767558-s9st6ff87482t00f64jkr77rncr15lqj.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:215697767558:android:cd6b0eb29b339c812ca507",
+        "android_client_info": {
+          "package_name": "com.tuktrack.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "215697767558-s9st6ff87482t00f64jkr77rncr15lqj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCoYMDfLYGYabvvRwXvQQAGbt9Is-CABVI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "215697767558-s9st6ff87482t00f64jkr77rncr15lqj.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
