@@ -90,13 +90,13 @@ export default function DashboardLayout({ children, role }: { children: React.Re
   const navItems = role === 'manager' ? [
     { icon: Lock, label: t('reservations'), path: '#', comingSoon: true },
     { icon: Home, label: t('dashboard'), path: '/manager/dashboard' },
+    { icon: MessageCircle, label: 'Mensagens', path: '/manager/messages' },
     { icon: Shield, label: t('vehicles'), path: '/manager/vehicles' },
     { icon: Users, label: t('drivers'), path: '/manager/drivers' },
     { icon: Activity, label: t('trips_routes'), path: '/manager/trips' },
     { icon: MapIcon, label: t('map'), path: '/manager/map' },
     { icon: BarChart, label: t('reports'), path: '/manager/reports' },
     { icon: CreditCard, label: t('subscription'), path: '/manager/billing' },
-    { icon: MessageCircle, label: 'Mensagens', path: '/manager/messages' },
     { icon: Settings, label: t('settings'), path: '/manager/settings' },
   ] : [
     { icon: Home, label: t('home'), path: '/driver/dashboard' },
