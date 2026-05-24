@@ -895,6 +895,9 @@ export default function DriverDashboard() {
             // STEP 3: Show persistent status bar notification
             setAppBadge(1);
             try { (window as any).AndroidBridge?.setDriverOnlineState?.(true); } catch(_) {}
+            // Persist UID so the native service can write to Firestore via REST
+            // when the app is killed and the WebView / JS SDK are unavailable.
+            try { (window as any).AndroidBridge?.setDriverUid?.(user?.uid || ''); } catch(_) {}
             showOnlineNotification(
               activeShift?.startedAt ? new Date(activeShift.startedAt) :
               activeShift?.createdAt ? new Date(activeShift.createdAt) :
@@ -977,6 +980,7 @@ export default function DriverDashboard() {
       hideOnlineNotification();
       setAppBadge(0);
       try { (window as any).AndroidBridge?.setDriverOnlineState?.(false); } catch(_) {}
+      try { (window as any).AndroidBridge?.setDriverUid?.(''); } catch(_) {}
       // Stop native Android Foreground Service
       try {
         const CapPlugin = (window as any)?.Capacitor?.Plugins;
