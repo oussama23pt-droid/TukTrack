@@ -29,6 +29,42 @@ const _store = {
   onCoordsUpdate: null as ((coords: { lat: number; lng: number }) => void) | null,
 };
 
+// ── SERVICE WORKER + NOTIFICATION HELPERS ────────────────────────────────────
+// Registers the location-worker.js service worker and uses it to show a
+// persistent system notification while the driver is online.
+// This works even when the app is in the background or the screen is off.
+
+async function registerLocationWorker(): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) return null;
+  try {
+    const reg = await navigator.serviceWorker.register('/location-worker.js', { scope: '/' });
+    await navigator.serviceWorker.ready;
+    return reg;
+  } catch (e) {
+    console.warn('[SW] Failed to register location-worker:', e);
+    return null;
+  }
+}
+
+async function requestNotificationPermission(): Promise<boolean> {
+  if (!('Notification' in window)) return false;
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') return false;
+  const result = await Notification.requestPermission();
+  return result === 'granted';
+}
+
+async function sendWorkerMessage(type: string, payload?: any) {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    reg.active?.postMessage({ type, payload });
+  } catch (e) {
+    console.warn('[SW] postMessage failed:', e);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Register callback at module load time — Median calls this from native via evaluateJavascript
 window.medianLocationUpdated = async (location: any) => {
   if (!location?.latitude || !location?.longitude) return;
@@ -673,6 +709,8 @@ export default function DriverDashboard() {
         // Always update map immediately
         setCurrentCoords({ lat, lng });
         setLocationStatus('active');
+        // Keep notification body fresh with latest position
+        sendWorkerMessage('UPDATE_NOTIFICATION', { lat, lng });
 
         // Throttle Firestore writes to every 5 seconds
         const now = Date.now();
@@ -765,6 +803,17 @@ export default function DriverDashboard() {
             setIsOnline(true);
             setLocationStatus('active');
 
+            // ── Show persistent system notification ──────────────────────────
+            // Works in background: driver can lock screen and location keeps
+            // updating; tapping the notification reopens the dashboard.
+            (async () => {
+              const granted = await requestNotificationPermission();
+              if (granted) {
+                await registerLocationWorker();
+                await sendWorkerMessage('GO_ONLINE');
+              }
+            })();
+
             // STEP 2: Request permissions sequentially AFTER tracking starts
             // This way location always works even if driver skips permissions
             if ((window as any).median) {
@@ -851,7 +900,7 @@ export default function DriverDashboard() {
         lastUpdated: serverTimestamp()
       });
       setIsOnline(false);
-      hideOnlineNotification();
+      sendWorkerMessage('GO_OFFLINE');
     } catch (err: any) {
       handleFirestoreError(err, 'update', `users/${user.uid}`);
     } finally {
