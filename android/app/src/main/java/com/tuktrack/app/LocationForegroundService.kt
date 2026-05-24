@@ -10,60 +10,71 @@ import android.location.Location
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.google.android.gms.location.*
 
 /**
  * LocationForegroundService
  *
- * Runs as an Android Foreground Service — this means Android will NOT kill it
- * when the driver switches apps or locks the screen. It keeps GPS running and
- * sends location updates back to the WebView via evaluateJavascript().
+ * An Android Foreground Service — the only way to:
+ *   1. Show a notification the USER CANNOT DISMISS (when tied to startForeground).
+ *   2. Keep the app process permanently awake in the background.
+ *   3. Keep GPS running when the driver switches apps or locks the screen.
  *
- * Started by AndroidBridge.showForegroundNotification() when driver goes ONLINE.
- * Stopped by AndroidBridge.hideForegroundNotification() when driver goes OFFLINE.
+ * Key facts about foreground service notifications:
+ *   - They are posted via startForeground(id, notification) — NOT NotificationManager.notify().
+ *   - Android NEVER allows the user to dismiss a notification posted by startForeground().
+ *   - The "Clear all" button in the notification panel skips them entirely.
+ *   - They disappear ONLY when the service is stopped (driver goes offline).
  */
 class LocationForegroundService : Service() {
 
     companion object {
-        private const val CHANNEL_ID     = "tuktrack_online"
-        private const val NOTIFICATION_ID = 1001
+        private const val CHANNEL_ID      = "tuktrack_online"
+        private const val NOTIFICATION_ID = 1001  // must match the ID used in startForeground
     }
 
     private lateinit var fusedClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
         fusedClient = LocationServices.getFusedLocationProviderClient(this)
+
+        // WakeLock: prevents the CPU from sleeping so Firebase listeners and
+        // GPS updates keep running even when the screen is off.
+        val pm = getSystemService(PowerManager::class.java)
+        wakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "TukTrack::LocationWakeLock"
+        ).also { it.acquire(12 * 60 * 60 * 1000L) } // max 12 hours per shift
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        createChannel()
+        // startForeground() is what makes the notification non-dismissable.
+        // This is fundamentally different from NotificationManager.notify().
         startForeground(NOTIFICATION_ID, buildNotification())
         startLocationUpdates()
-        return START_STICKY   // restart automatically if killed by system
+        // START_STICKY: if Android kills this service due to memory pressure,
+        // it will be automatically restarted — driver stays online.
+        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         super.onDestroy()
-        fusedClient.removeLocationUpdates(locationCallback)
+        if (::locationCallback.isInitialized) {
+            fusedClient.removeLocationUpdates(locationCallback)
+        }
+        // Release WakeLock when driver goes offline
+        try { wakeLock?.release() } catch (e: Exception) {}
     }
 
     private fun buildNotification(): Notification {
-        // Create channel if it doesn't exist yet
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID, "TukTrack Online Status",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                setShowBadge(false)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            }
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-        }
-
         val tapIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java).apply {
@@ -75,12 +86,29 @@ class LocationForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🟢 TukTrack — Online")
             .setContentText("A partilhar localização em tempo real. Toque para abrir.")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSmallIcon(R.drawable.ic_stat_icon)
+            .setColor(0xFFF59E0B.toInt())
             .setContentIntent(tapIntent)
-            .setOngoing(true)
+            .setOngoing(true)       // reinforces non-dismissable intent
+            .setSilent(true)        // no sound — status bar only
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
+    }
+
+    private fun createChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "TukTrack Online Status",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
     }
 
     private fun startLocationUpdates() {
@@ -94,41 +122,27 @@ class LocationForegroundService : Service() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc: Location = result.lastLocation ?: return
-                sendLocationToWebView(loc.latitude, loc.longitude, loc.accuracy)
+                broadcastLocation(loc.latitude, loc.longitude, loc.accuracy)
             }
         }
 
         try {
-            fusedClient.requestLocationUpdates(
-                request, locationCallback, Looper.getMainLooper()
-            )
+            fusedClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
         } catch (e: SecurityException) {
             stopSelf()
         }
     }
 
-    private fun sendLocationToWebView(lat: Double, lng: Double, accuracy: Float) {
-        // Find the MainActivity's WebView and call the JS callback
-        // This is the same callback the web side already listens to
-        val js = "if(window.medianLocationUpdated){" +
-            "window.medianLocationUpdated({latitude:$lat,longitude:$lng,accuracy:$accuracy});}"
-        try {
-            val activity = application as? android.app.Application
-            // Post to main thread
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                try {
-                    // Access the WebView through the bridge
-                    val bridge = (applicationContext as? com.getcapacitor.BridgeActivity)
-                    // Use broadcast instead — safer cross-component
-                    val broadcastIntent = Intent("com.tuktrack.LOCATION_UPDATE").apply {
-                        putExtra("lat", lat)
-                        putExtra("lng", lng)
-                        putExtra("accuracy", accuracy)
-                        setPackage(packageName)
-                    }
-                    sendBroadcast(broadcastIntent)
-                } catch (e: Exception) {}
-            }
-        } catch (e: Exception) {}
+    private fun broadcastLocation(lat: Double, lng: Double, accuracy: Float) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try {
+                sendBroadcast(Intent("com.tuktrack.LOCATION_UPDATE").apply {
+                    putExtra("lat", lat)
+                    putExtra("lng", lng)
+                    putExtra("accuracy", accuracy)
+                    setPackage(packageName)
+                })
+            } catch (e: Exception) {}
+        }
     }
 }
