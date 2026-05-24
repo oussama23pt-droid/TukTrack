@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, addDoc, onSnapshot, query, where, orderBy, serverTimestamp, getDocs } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, query, where, orderBy, serverTimestamp, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import { useAuth } from '../../auth/AuthContext';
 import { Send, MessageCircle, ChevronLeft } from 'lucide-react';
@@ -46,18 +46,20 @@ export default function ManagerMessagesPage() {
     if (!user || !selectedDriver) return;
     prevCountRef.current = 0;
 
-    if (!selectedDriver) return;
+    // 7-day history filter
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
     const q = query(
       collection(db, 'messages'),
       where('managerId', '==', user.uid),
       where('driverUid', '==', selectedDriver.uid),
+      where('createdAt', '>=', Timestamp.fromDate(sevenDaysAgo)),
       orderBy('createdAt', 'asc')
     );
 
     const unsub = onSnapshot(q, (snap) => {
       const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Message));
-      // Filter to only this driver's conversation
-      const conv = msgs.filter(m => m.senderId === selectedDriver.uid || (m.senderRole === 'manager' && msgs.some(x => x.senderId === selectedDriver.uid)));
       setMessages(msgs);
 
       // Push notification for new messages from drivers
@@ -67,11 +69,16 @@ export default function ManagerMessagesPage() {
           if (msg.senderId !== user.uid && msg.senderRole === 'driver') {
             try {
               const bridge = (window as any).AndroidBridge;
-              bridge?.showAlertNotification?.(
-                `💬 ${msg.senderName}`,
-                msg.text,
-                8000 + (msgs.length % 100)
-              );
+              if (bridge?.showAlertNotification) {
+                bridge.showAlertNotification(`💬 ${msg.senderName}`, msg.text, 8000);
+              }
+              if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification(`💬 ${msg.senderName}`, {
+                  body: msg.text,
+                  icon: '/pwa-192x192.png',
+                  tag: 'tuktrack-message',
+                });
+              }
             } catch (e) {}
           }
         });
@@ -155,11 +162,8 @@ export default function ManagerMessagesPage() {
   }
 
   // Chat view
-  const conv = messages.filter(m =>
-    m.senderId === selectedDriver.uid ||
-    (m.senderRole === 'manager' && m.targetDriverId === selectedDriver.uid) ||
-    (m.senderRole === 'manager' && !m.targetDriverId)
-  );
+  // All messages already filtered by driverUid in query
+  const conv = messages;
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
