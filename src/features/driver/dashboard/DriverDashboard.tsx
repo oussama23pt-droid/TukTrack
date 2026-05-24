@@ -872,6 +872,20 @@ export default function DriverDashboard() {
             setIsOnline(true);
             setLocationStatus('active');
 
+            // Start native Android Foreground Service — survives app kill
+            // Service shows persistent notification and keeps location running
+            try {
+              const CapPlugin = (window as any)?.Capacitor?.Plugins;
+              // Tell native layer to start foreground service
+              if (CapPlugin?.LocationForegroundService?.start) {
+                await CapPlugin.LocationForegroundService.start();
+              }
+              // Save online state for boot receiver
+              if (CapPlugin?.Preferences?.set) {
+                await CapPlugin.Preferences.set({ key: 'driver_online', value: 'true' });
+              }
+            } catch(e) {}
+
             // STEP 2: Request permissions — always show regardless of platform
             if (!overlayPermissionGranted.current) {
               setTimeout(() => setShowOverlayPermissionModal(true), 800);
@@ -961,8 +975,15 @@ export default function DriverDashboard() {
       });
       setIsOnline(false);
       hideOnlineNotification();
+      setAppBadge(0);
       try { (window as any).AndroidBridge?.setDriverOnlineState?.(false); } catch(_) {}
-    setAppBadge(0);
+      // Stop native Android Foreground Service
+      try {
+        const CapPlugin = (window as any)?.Capacitor?.Plugins;
+        if (CapPlugin?.Preferences?.set) {
+          await CapPlugin.Preferences.set({ key: 'driver_online', value: 'false' });
+        }
+      } catch(e) {}
     } catch (err: any) {
       handleFirestoreError(err, 'update', `users/${user.uid}`);
     } finally {
