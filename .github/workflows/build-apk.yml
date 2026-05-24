@@ -65,6 +65,29 @@ jobs:
             cp "$dir/ic_launcher.png" "$dir/ic_launcher_foreground.png"
           done
 
+      - name: Create missing drawable resource
+        run: |
+          mkdir -p android/app/src/main/res/drawable
+          cat > android/app/src/main/res/drawable/ic_stat_icon_default.xml << 'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7,-7.75 7,-13c0,-3.87 -3.13,-7 -7,-7zM12,11.5c-1.38,0 -2.5,-1.12 -2.5,-2.5s1.12,-2.5 2.5,-2.5 2.5,1.12 2.5,2.5 -1.12,2.5 -2.5,2.5z"/>
+          </vector>
+          EOF
+
+      - name: Fix ForegroundLocationService drawable reference
+        run: |
+          FILE="android/app/src/main/java/com/tuktrack/app/ForegroundLocationService.kt"
+          if [ -f "$FILE" ]; then
+            # Replace any R.drawable.* reference with the one we created
+            sed -i 's/R\.drawable\.[a-zA-Z_]*/R.drawable.ic_stat_icon_default/g' "$FILE"
+          fi
+
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
