@@ -2,7 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // --- GLOBAL HELPERS ---
     function isSignedIn() { return request.auth != null; }
     function authUid() { return request.auth.uid; }
     function incoming() { return request.resource.data; }
@@ -34,12 +33,9 @@ service cloud.firestore {
     
     function isValidId(id) { return id is string && id.size() <= 128; }
 
-    // --- DEFAULT DENY ---
     match /{document=**} {
       allow read, write: if false;
     }
-
-    // --- COLLECTION RULES ---
 
     match /users/{uid} {
       allow get: if isSignedIn() && (
@@ -53,12 +49,8 @@ service cloud.firestore {
         (request.auth.token.get('email', '') != '' && request.auth.token.email.lower() == resource.data.get('email', '').lower()) ||
         isManager()
       );
-      
-      // Allow creation of own profile or manager creating a driver profile
       allow create: if isSignedIn() && (authUid() == uid || isManager());
-      
       allow update: if isSignedIn() && (authUid() == uid || isManager());
-      
       allow delete: if isSignedIn() && (
         authUid() == uid || 
         (isManager() && existing().get('managerId', '') == authUid()) ||
@@ -67,7 +59,6 @@ service cloud.firestore {
     }
 
     match /drivers_init/{email} {
-      // Drivers check this by email before account creation
       allow get: if true; 
       allow create: if isManager();
       allow update, delete: if isSignedIn() && (
@@ -82,14 +73,11 @@ service cloud.firestore {
         resource.data.get('driverUid', '') == authUid() ||
         (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
       );
-      
       allow create: if isSignedIn();
-      
       allow update: if isSignedIn() && (
         resource.data.managerId == authUid() ||
         resource.data.driverUid == authUid()
       );
-      
       allow delete: if isManager() && existing().managerId == authUid();
     }
 
@@ -98,10 +86,7 @@ service cloud.firestore {
         resource.data.get('managerId', '') == request.auth.uid ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
       );
-      
-      // Allow creation if the vehicle is for the current user and they are a manager/owner
       allow create: if isSignedIn() && isManager() && (request.resource.data.get('managerId', '') == request.auth.uid);
-      
       allow update, delete: if isSignedIn() && (
         resource.data.get('managerId', '') == request.auth.uid || isManager()
       );
@@ -140,9 +125,7 @@ service cloud.firestore {
         (resource.data.get('isForDrivers', false) == true && exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
       );
       allow update: if isSignedIn() && (
-        // Managers can update everything
         (resource.data.managerId == authUid()) ||
-        // Drivers can ONLY update the 'read' field and only if they are the recipient or it's for all drivers
         (
           incoming().diff(existing()).affectedKeys().hasOnly(['read']) &&
           (
@@ -152,6 +135,26 @@ service cloud.firestore {
         )
       );
       allow delete: if isManager() && existing().managerId == authUid();
+    }
+
+    // ── MESSAGES — this was MISSING and caused the conversation error ──
+    match /messages/{id} {
+      // Both driver and manager in the same team can read their messages
+      allow read: if isSignedIn() && (
+        // Manager reads messages in their team
+        resource.data.get('managerId', '') == authUid() ||
+        // Driver reads messages addressed to them
+        resource.data.get('driverUid', '') == authUid()
+      );
+      // Both driver and manager can create messages
+      allow create: if isSignedIn() && (
+        // Driver can only send as themselves
+        (incoming().get('driverUid', '') == authUid() && incoming().get('senderRole', '') == 'driver') ||
+        // Manager can only send from their own account
+        (incoming().get('managerId', '') == authUid() && incoming().get('senderRole', '') == 'manager')
+      );
+      // No updates or deletes on messages (immutable chat history)
+      allow update, delete: if false;
     }
 
     match /customers/{uid}/{document=**} {
@@ -167,8 +170,8 @@ service cloud.firestore {
     }
 
     match /manager_subscriptions/{uid} {
-  allow read: if isSignedIn() && (authUid() == uid || isManager());
-  allow write: if isSignedIn() && authUid() == uid;
-}
+      allow read: if isSignedIn() && (authUid() == uid || isManager());
+      allow write: if isSignedIn() && authUid() == uid;
+    }
   }
 }
