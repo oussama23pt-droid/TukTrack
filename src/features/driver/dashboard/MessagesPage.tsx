@@ -29,6 +29,7 @@ export default function MessagesPage() {
     const q = query(
       collection(db, 'messages'),
       where('managerId', '==', userData.managerId),
+      where('driverUid', '==', user.uid),
       orderBy('createdAt', 'asc')
     );
 
@@ -73,6 +74,7 @@ export default function MessagesPage() {
         senderName: userData.name || 'Driver',
         senderRole: 'driver',
         managerId: userData.managerId,
+        driverUid: user.uid,
         createdAt: serverTimestamp(),
         read: false,
       });
