@@ -18,46 +18,14 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 // @ts-ignore
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
 
-// ─── MODULE-LEVEL LOCATION STORE ─────────────────────────────────────────────
-// Lives completely outside React so Android WebView never loses it on re-renders,
-// background/foreground transitions, or hot reloads.
+// ─── CAPACITOR BACKGROUND GEOLOCATION STORE ─────────────────────────────────
+// Lives outside React — survives re-renders and background/foreground transitions
 const _store = {
   isOnline: false,
   uid: null as string | null,
   lastFirestoreWrite: 0,
-  latestCoords: null as { lat: number; lng: number } | null,
+  watcherId: null as string | null,
   onCoordsUpdate: null as ((coords: { lat: number; lng: number }) => void) | null,
-};
-
-// Register callback at module load time — Median calls this from native via evaluateJavascript
-window.medianLocationUpdated = async (location: any) => {
-  if (!location?.latitude || !location?.longitude) return;
-  if (!_store.isOnline) return;
-  if (!_store.uid) return;
-
-  const lat = Number(location.latitude);
-  const lng = Number(location.longitude);
-
-  // Always push coords to React immediately via the registered callback
-  _store.latestCoords = { lat, lng };
-  if (_store.onCoordsUpdate) _store.onCoordsUpdate({ lat, lng });
-
-  // Throttle Firestore writes to every 4 seconds
-  const now = Date.now();
-  if (now - _store.lastFirestoreWrite < 4000) return;
-  _store.lastFirestoreWrite = now;
-
-  try {
-    await updateDoc(doc(db, 'users', _store.uid), {
-      location: { lat, lng, updatedAt: new Date().toISOString() },
-      currentLat: lat,
-      currentLng: lng,
-      locationAccuracy: location.accuracy ?? null,
-      lastUpdated: serverTimestamp(),
-    });
-  } catch (err) {
-    console.error('[Median] Firestore write error:', err);
-  }
 };
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -306,14 +274,16 @@ export default function DriverDashboard() {
   // We use only refs inside the callback — no React state setters — to avoid stale closure issues.
   // A setInterval polls the ref every 2 seconds and pushes coords into React state safely.
 
-  // Sync _store with current React state — keeps the module-level callback accurate
+  // Sync _store uid with current user
   useEffect(() => {
     _store.uid = user?.uid || null;
   }, [user?.uid]);
 
+  // Register coords update callback
   useEffect(() => {
-    _store.isOnline = isOnline;
-  }, [isOnline]);
+    _store.onCoordsUpdate = (coords) => setCurrentCoords(coords);
+    return () => { _store.onCoordsUpdate = null; };
+  }, []);
 
   // Register the React coords setter into the store so the callback can push updates
   useEffect(() => {
@@ -611,92 +581,119 @@ export default function DriverDashboard() {
     return () => unsub();
   }, [user]);
 
-  const startBackgroundLocation = (): boolean => {
-    if (!(window as any).median?.backgroundLocation) return false;
+  // ─── CAPACITOR BACKGROUND GEOLOCATION ───────────────────────────────────────
+  // Uses @capacitor-community/background-geolocation for true background tracking
+  // Shows persistent notification in Android notification bar while online
+  // Falls back to watchPosition on web browser
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  const startLocationTracking = async () => {
+    _store.uid = user?.uid || null;
+    _store.isOnline = true;
+
     try {
-      (window as any).median.backgroundLocation.start({
-        callback: 'medianLocationUpdated',
-        androidPriority: 'highAccuracy',
-        androidInterval: 5000,
-        androidFastestInterval: 3000,
-        iosDesiredAccuracy: 'best',
-        iosDistanceFilter: 10,
-        androidNotificationTitle: '🟢 TukTrack — Online',
-        androidNotificationText: 'A partilhar localização em tempo real. Toque para abrir a aplicação.',
-        androidNotificationIcon: 'ic_notification',
-      });
-      console.log('[Median] backgroundLocation started successfully');
-      return true;
-    } catch (e) {
-      console.warn('[Median] backgroundLocation.start failed, falling back to watchPosition:', e);
-      return false;
-    }
-  };
+      // Dynamically import Capacitor plugin — only available in native APK build
+      const { BackgroundGeolocation } = await import('@capacitor-community/background-geolocation');
 
-  const stopBackgroundLocation = () => {
-    if ((window as any).median?.backgroundLocation) {
-      try {
-        (window as any).median.backgroundLocation.stop();
-      } catch (e) {
-        console.warn('[Median] backgroundLocation.stop failed:', e);
+      // Remove any previous watcher first
+      if (_store.watcherId) {
+        await BackgroundGeolocation.removeWatcher({ id: _store.watcherId });
+        _store.watcherId = null;
       }
-    }
-  };
 
-  const startLocationTracking = () => {
-    // Try Median background location plugin first (works in background too)
-    // If the plugin exists but is unlicensed/fails, fall through to watchPosition
-    if ((window as any).median?.backgroundLocation) {
-      const started = startBackgroundLocation();
-      if (started) return; // plugin is working — no need for watchPosition
-      // Plugin failed — fall through to watchPosition below
+      const watcherId = await BackgroundGeolocation.addWatcher(
+        {
+          // Notification shown in Android notification bar while tracking
+          backgroundMessage: 'A partilhar localizacao em tempo real.',
+          backgroundTitle: 'TukTrack — Online',
+          requestPermissions: true, // automatically asks for location permission
+          stale: false,
+          distanceFilter: 10, // update every 10 metres moved
+        },
+        async (location, error) => {
+          if (error) {
+            console.error('[BGGeo] Error:', error.code, error.message);
+            if (error.code === 'NOT_AUTHORIZED') {
+              // Guide driver to settings
+              const open = window.confirm(
+                'TukTrack precisa de acesso a localizacao. Abrir Definicoes?'
+              );
+              if (open) BackgroundGeolocation.openSettings();
+            }
+            return;
+          }
+          if (!location || !_store.isOnline || !_store.uid) return;
+
+          const lat = location.latitude;
+          const lng = location.longitude;
+
+          // Update map in real time
+          _store.onCoordsUpdate?.({ lat, lng });
+          setCurrentCoords({ lat, lng });
+          setLocationStatus('active');
+
+          // Throttle Firestore writes to every 5 seconds
+          const now = Date.now();
+          if (now - _store.lastFirestoreWrite < 5000) return;
+          _store.lastFirestoreWrite = now;
+
+          try {
+            await updateDoc(doc(db, 'users', _store.uid), {
+              location: { lat, lng, updatedAt: new Date().toISOString() },
+              currentLat: lat,
+              currentLng: lng,
+              locationAccuracy: location.accuracy ?? null,
+              lastUpdated: serverTimestamp(),
+            });
+          } catch (err) {
+            console.error('[BGGeo] Firestore write error:', err);
+          }
+        }
+      );
+
+      _store.watcherId = watcherId;
+      console.log('[BGGeo] Background geolocation started, watcher:', watcherId);
+      return; // Success — no need for watchPosition fallback
+
+    } catch (e) {
+      // Capacitor plugin not available — running in browser/web mode
+      console.warn('[BGGeo] Plugin not available, falling back to watchPosition:', e);
     }
 
-    // watchPosition fallback: works on web AND in APK when plugin is unavailable
-    // This keeps location updating as long as the screen is on
+    // ── watchPosition fallback (web browser only) ──────────────────────────────
     if (locationWatchRef.current !== null) {
       navigator.geolocation.clearWatch(locationWatchRef.current);
       locationWatchRef.current = null;
     }
 
-    console.log('[GPS] Starting watchPosition fallback');
-
     const watchId = navigator.geolocation.watchPosition(
       async (pos) => {
-        if (!user) return;
-
+        if (!user || !_store.isOnline) return;
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
 
-        // Always update map immediately
         setCurrentCoords({ lat, lng });
         setLocationStatus('active');
 
-        // Throttle Firestore writes to every 5 seconds
         const now = Date.now();
         if (now - lastUpdateRef.current < 5000) return;
         lastUpdateRef.current = now;
 
         try {
           await updateDoc(doc(db, 'users', user.uid), {
-            location: {
-              lat,
-              lng,
-              updatedAt: new Date().toISOString()
-            },
+            location: { lat, lng, updatedAt: new Date().toISOString() },
             currentLat: lat,
             currentLng: lng,
             locationAccuracy: pos.coords.accuracy,
-            lastUpdated: serverTimestamp()
+            lastUpdated: serverTimestamp(),
           });
         } catch (err) {
-          console.error('[GPS] watchPosition Firestore write error:', err);
+          console.error('[GPS] Firestore write error:', err);
         }
       },
       (err) => {
         console.error('[GPS] watchPosition error:', err);
         setLocationStatus('disabled');
-        // Retry after 5s only if still online — prevents restart loop
         if (locationWatchRef.current !== null) {
           setTimeout(() => {
             if (isOnlineRef.current) startLocationTracking();
@@ -710,7 +707,22 @@ export default function DriverDashboard() {
     setLocationWatchId(watchId);
   };
 
-  const stopLocationTracking = () => {
+  const stopLocationTracking = async () => {
+    _store.isOnline = false;
+
+    // Stop Capacitor background geolocation
+    if (_store.watcherId) {
+      try {
+        const { BackgroundGeolocation } = await import('@capacitor-community/background-geolocation');
+        await BackgroundGeolocation.removeWatcher({ id: _store.watcherId });
+        _store.watcherId = null;
+        console.log('[BGGeo] Stopped');
+      } catch (e) {
+        console.warn('[BGGeo] Stop failed:', e);
+      }
+    }
+
+    // Stop watchPosition fallback
     if (locationWatchRef.current !== null) {
       navigator.geolocation.clearWatch(locationWatchRef.current);
       locationWatchRef.current = null;
@@ -836,7 +848,7 @@ export default function DriverDashboard() {
       _store.latestCoords = null;
       lastUpdateRef.current = 0; // reset throttle — next go-online writes position immediately
       stopLocationTracking();
-      stopBackgroundLocation();
+      stopLocationTracking();
       await updateDoc(doc(db, 'users', user.uid), {
         isOnline: false,
         status: 'offline',
@@ -861,11 +873,11 @@ export default function DriverDashboard() {
     setTimeout(() => startLocationTracking(), 500);
   } else {
     stopLocationTracking();
-    stopBackgroundLocation();
+    stopLocationTracking();
   }
   return () => {
     stopLocationTracking();
-    stopBackgroundLocation();
+    stopLocationTracking();
   };
 }, [isOnline, user?.uid]);
 
