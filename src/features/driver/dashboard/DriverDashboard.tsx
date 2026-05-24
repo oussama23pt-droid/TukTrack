@@ -186,8 +186,37 @@ export default function DriverDashboard() {
       limit(3)
     );
 
+    // Track which notification IDs we've already pushed to the bar
+    const pushedNotifIds = new Set<string>();
+
     const unsubNotify = onSnapshot(notifyQuery, (snapshot) => {
-      setNotifications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      setNotifications(docs);
+
+      // Push NEW notifications to the Android notification bar
+      const bridge = (window as any).AndroidBridge;
+      if (bridge?.showAlertNotification) {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const data = change.doc.data() as any;
+            const docId = change.doc.id;
+            if (!pushedNotifIds.has(docId)) {
+              pushedNotifIds.add(docId);
+              // Use a stable numeric ID derived from the doc ID
+              const numId = Math.abs(docId.split('').reduce(
+                (acc: number, c: string) => acc + c.charCodeAt(0), 3000
+              )) % 9000 + 3000;
+              try {
+                bridge.showAlertNotification(
+                  data.title || 'TukTrack',
+                  data.message || data.body || '',
+                  numId
+                );
+              } catch (e) {}
+            }
+          }
+        });
+      }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'notifications');
     });
@@ -468,6 +497,17 @@ export default function DriverDashboard() {
         if (!prevActiveShiftRef.current && !sessionStorage.getItem(shiftSeenKey)) {
           sessionStorage.setItem(shiftSeenKey, 'true');
           setShowShiftStartModal(true);
+          // Push shift start alert to Android notification bar
+          try {
+            const bridge = (window as any).AndroidBridge;
+            if (bridge?.showAlertNotification) {
+              bridge.showAlertNotification(
+                '🚦 Turno Iniciado pelo Gestor!',
+                'O seu gestor iniciou um turno. Entre em serviço quando estiver pronto.',
+                5001
+              );
+            }
+          } catch (e) {}
         }
         prevActiveShiftRef.current = shiftData;
         setActiveShift(shiftData);
