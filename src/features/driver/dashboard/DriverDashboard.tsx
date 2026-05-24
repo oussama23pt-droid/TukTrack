@@ -651,27 +651,30 @@ export default function DriverDashboard() {
 
     // Try Capacitor background geolocation first (true background tracking)
     try {
-      const { BackgroundGeolocation } = await import('@capacitor-community/background-geolocation');
+      // Use Capacitor BackgroundGeolocation via window object (injected by Capacitor runtime)
+      // This avoids Vite build errors while still working in the native APK
+      const BGGeo = (window as any)?.Capacitor?.Plugins?.BackgroundGeolocation;
+      if (!BGGeo) throw new Error('BGGeo plugin not available');
 
       if (bgWatcherIdRef.current) {
-        await BackgroundGeolocation.removeWatcher({ id: bgWatcherIdRef.current });
+        await BGGeo.removeWatcher({ id: bgWatcherIdRef.current });
         bgWatcherIdRef.current = null;
       }
 
-      const watcherId = await BackgroundGeolocation.addWatcher(
+      const watcherId = await BGGeo.addWatcher(
         {
-          backgroundMessage: 'A partilhar localização em tempo real.',
-          backgroundTitle: '🟢 TukTrack — Em Serviço',
+          backgroundMessage: 'A partilhar localizacao em tempo real.',
+          backgroundTitle: 'TukTrack — Em Servico',
           requestPermissions: true,
           stale: false,
           distanceFilter: 10,
         },
-        async (location, error) => {
+        async (location: any, error: any) => {
           if (error) {
             console.error('[BGGeo]', error.code, error.message);
             if (error.code === 'NOT_AUTHORIZED') {
               const open = window.confirm('TukTrack precisa de localizacao. Abrir Definicoes?');
-              if (open) BackgroundGeolocation.openSettings();
+              if (open) BGGeo.openSettings();
             }
             return;
           }
@@ -753,8 +756,8 @@ export default function DriverDashboard() {
     // Stop Capacitor background geolocation
     if (bgWatcherIdRef.current) {
       try {
-        const { BackgroundGeolocation } = await import('@capacitor-community/background-geolocation');
-        await BackgroundGeolocation.removeWatcher({ id: bgWatcherIdRef.current });
+        const BGGeo = (window as any)?.Capacitor?.Plugins?.BackgroundGeolocation;
+        if (BGGeo) await BGGeo.removeWatcher({ id: bgWatcherIdRef.current });
         bgWatcherIdRef.current = null;
       } catch (e) {}
     }
