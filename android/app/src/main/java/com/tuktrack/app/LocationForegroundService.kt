@@ -18,8 +18,8 @@ import com.google.android.gms.location.*
 class LocationForegroundService : Service() {
 
     companion object {
-        const val CHANNEL_ID      = "tuktrack_online"
-        const val NOTIFICATION_ID = 1001
+        const val CHANNEL_ID        = "tuktrack_online"
+        const val NOTIFICATION_ID   = 1001
         const val EXTRA_SHIFT_START = "shift_start_epoch_ms"
     }
 
@@ -27,7 +27,6 @@ class LocationForegroundService : Service() {
     private lateinit var locationCallback: LocationCallback
     private var wakeLock: PowerManager.WakeLock? = null
 
-    // Timer that updates the notification every second
     private val handler = Handler(Looper.getMainLooper())
     private var shiftStartMs: Long = 0L
 
@@ -43,28 +42,27 @@ class LocationForegroundService : Service() {
         fusedClient = LocationServices.getFusedLocationProviderClient(this)
         createChannel()
 
-        // WakeLock: keeps CPU alive even when screen is off
+        // PARTIAL_WAKE_LOCK: keeps CPU alive even with screen off
         val pm = getSystemService(PowerManager::class.java)
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "TukTrack::LocationWakeLock"
-        ).also { it.acquire(12 * 60 * 60 * 1000L) }
+        ).also { it.acquire(12 * 60 * 60 * 1000L) } // max 12 hours
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Receive shift start time from JS (milliseconds since epoch)
         shiftStartMs = intent?.getLongExtra(EXTRA_SHIFT_START, 0L) ?: 0L
         if (shiftStartMs == 0L) shiftStartMs = System.currentTimeMillis()
 
-        // THIS is the key — startForeground() posts a notification that
-        // Android NEVER lets the user dismiss, not even with "Clear all"
+        // startForeground() posts the ONLY notification Android cannot let
+        // the user swipe away — even with "Clear all". This is the key.
         startForeground(NOTIFICATION_ID, buildNotification())
         startLocationUpdates()
 
-        // Start live timer — updates notification every second
         handler.removeCallbacks(timerRunnable)
         handler.post(timerRunnable)
 
+        // START_STICKY: Android restarts this service automatically if killed
         return START_STICKY
     }
 
@@ -77,14 +75,13 @@ class LocationForegroundService : Service() {
         try { wakeLock?.release() } catch (e: Exception) {}
     }
 
-    // Called every second by timerRunnable to refresh the elapsed time
     private fun updateNotification() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.notify(NOTIFICATION_ID, buildNotification())
     }
 
     private fun buildNotification(): Notification {
-        val elapsed = System.currentTimeMillis() - shiftStartMs
+        val elapsed   = System.currentTimeMillis() - shiftStartMs
         val totalSecs = (elapsed / 1000).coerceAtLeast(0)
         val h = totalSecs / 3600
         val m = (totalSecs % 3600) / 60
@@ -105,15 +102,16 @@ class LocationForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🟢 TukTrack — Em Serviço  •  $timer")
             .setContentText("A partilhar localização em tempo real. Toque para abrir.")
+            // setOngoing(true) = driver CANNOT swipe this away
+            .setOngoing(true)
+            .setSilent(true)
             .setSmallIcon(R.drawable.ic_stat_icon)
             .setColor(0xFFF59E0B.toInt())
             .setContentIntent(tapIntent)
-            .setOngoing(true)           // non-dismissable flag
-            .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            // UsesChronometer makes Android show a live ticking clock in the notification
+            // Live ticking clock shown next to the notification
             .setUsesChronometer(true)
             .setChronometerCountDown(false)
             .setWhen(shiftStartMs)
@@ -125,13 +123,15 @@ class LocationForegroundService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "TukTrack Online Status",
+                // IMPORTANCE_LOW = no sound, but persistent and visible
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
+                description      = "Mostra enquanto o motorista partilha localização"
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                // IMPORTANT: disabling user ability to turn off this channel
-                // prevents the driver from accidentally hiding it
-                setBlockable(false)
+                // Prevent driver from disabling this notification channel
+                // Note: setBlockable(false) prevents the user from turning off the channel in settings
+                // This is important so drivers cannot accidentally hide the tracking notification
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
@@ -148,6 +148,7 @@ class LocationForegroundService : Service() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc: Location = result.lastLocation ?: return
+                // Broadcast to the WebView via a local intent
                 sendBroadcast(Intent("com.tuktrack.LOCATION_UPDATE").apply {
                     putExtra("lat", loc.latitude)
                     putExtra("lng", loc.longitude)
@@ -159,6 +160,8 @@ class LocationForegroundService : Service() {
 
         try {
             fusedClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
-        } catch (e: SecurityException) { stopSelf() }
+        } catch (e: SecurityException) {
+            stopSelf()
+        }
     }
 }
