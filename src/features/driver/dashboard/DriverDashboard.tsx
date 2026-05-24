@@ -352,6 +352,32 @@ export default function DriverDashboard() {
     return () => { _store.onCoordsUpdate = null; };
   }, []);
 
+  // Listen to native GPS broadcasts forwarded by MainActivity from LocationForegroundService
+  // This keeps location updating even when the WebView JS is throttled in background
+  useEffect(() => {
+    const handleNativeLocation = (e: any) => {
+      const { latitude, longitude, accuracy } = e.detail || {};
+      if (!latitude || !longitude) return;
+      const lat = Number(latitude);
+      const lng = Number(longitude);
+      _store.latestCoords = { lat, lng };
+      if (_store.onCoordsUpdate) _store.onCoordsUpdate({ lat, lng });
+      // Throttle Firestore writes to every 4 seconds
+      const now = Date.now();
+      if (!_store.uid || !_store.isOnline || now - _store.lastFirestoreWrite < 4000) return;
+      _store.lastFirestoreWrite = now;
+      updateDoc(doc(db, 'users', _store.uid), {
+        location: { lat, lng, updatedAt: new Date().toISOString() },
+        currentLat: lat,
+        currentLng: lng,
+        locationAccuracy: accuracy ?? null,
+        lastUpdated: serverTimestamp(),
+      }).catch((err: any) => console.error('[NativeGPS] Firestore error:', err));
+    };
+    window.addEventListener('nativeLocationUpdate', handleNativeLocation);
+    return () => window.removeEventListener('nativeLocationUpdate', handleNativeLocation);
+  }, []);
+
   // Monitor GPS status — block driver from turning off GPS while online,
   // and notify manager when GPS is lost or restored
   useEffect(() => {
@@ -829,6 +855,8 @@ export default function DriverDashboard() {
               },
               lastUpdated: serverTimestamp()
             });
+            // Tell native layer driver is online so BootReceiver persists it
+            try { (window as any).AndroidBridge?.setDriverOnlineState?.(true); } catch (_) {}
             // STEP 1: Start watchPosition FIRST — location works immediately
             startLocationTracking();
             setIsOnline(true);
@@ -921,7 +949,9 @@ export default function DriverDashboard() {
       });
       setIsOnline(false);
       hideOnlineNotification();
-    setAppBadge(0);
+      setAppBadge(0);
+      // Tell native layer driver is offline so BootReceiver won't restart service
+      try { (window as any).AndroidBridge?.setDriverOnlineState?.(false); } catch (_) {}
     } catch (err: any) {
       handleFirestoreError(err, 'update', `users/${user.uid}`);
     } finally {
@@ -1900,17 +1930,9 @@ export default function DriverDashboard() {
                         }
                       }, 500);
                     } else {
-                      // Always open settings directly — never show a manual text alert
+                      // No bridge — just mark granted and continue; service handles the rest
                       backgroundLocationGranted.current = true;
                       localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                      try {
-                        // Try Capacitor way
-                        const { App } = await import('@capacitor/app');
-                        (App as any).openUrl({ url: 'android.settings.APPLICATION_DETAILS_SETTINGS' });
-                      } catch {
-                        // Final fallback: open settings via window location
-                        window.location.href = 'intent:#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;end';
-                      }
                     }
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
