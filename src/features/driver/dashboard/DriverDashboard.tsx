@@ -29,42 +29,6 @@ const _store = {
   onCoordsUpdate: null as ((coords: { lat: number; lng: number }) => void) | null,
 };
 
-// ── SERVICE WORKER + NOTIFICATION HELPERS ────────────────────────────────────
-// Registers the location-worker.js service worker and uses it to show a
-// persistent system notification while the driver is online.
-// This works even when the app is in the background or the screen is off.
-
-async function registerLocationWorker(): Promise<ServiceWorkerRegistration | null> {
-  if (!('serviceWorker' in navigator)) return null;
-  try {
-    const reg = await navigator.serviceWorker.register('/location-worker.js', { scope: '/' });
-    await navigator.serviceWorker.ready;
-    return reg;
-  } catch (e) {
-    console.warn('[SW] Failed to register location-worker:', e);
-    return null;
-  }
-}
-
-async function requestNotificationPermission(): Promise<boolean> {
-  if (!('Notification' in window)) return false;
-  if (Notification.permission === 'granted') return true;
-  if (Notification.permission === 'denied') return false;
-  const result = await Notification.requestPermission();
-  return result === 'granted';
-}
-
-async function sendWorkerMessage(type: string, payload?: any) {
-  if (!('serviceWorker' in navigator)) return;
-  try {
-    const reg = await navigator.serviceWorker.ready;
-    reg.active?.postMessage({ type, payload });
-  } catch (e) {
-    console.warn('[SW] postMessage failed:', e);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Register callback at module load time — Median calls this from native via evaluateJavascript
 window.medianLocationUpdated = async (location: any) => {
   if (!location?.latitude || !location?.longitude) return;
@@ -649,6 +613,50 @@ export default function DriverDashboard() {
     return () => unsub();
   }, [user]);
 
+  // ── FOREGROUND NOTIFICATION via AndroidBridge ──────────────────────────────
+  // Shows a persistent notification in the Android status bar while online.
+  // Uses the JavascriptInterface injected by the fixed MainActivity.kt.
+  // Falls back to Web Notification API if AndroidBridge is unavailable.
+  const showOnlineNotification = async () => {
+    const bridge = (window as any).AndroidBridge;
+
+    // Primary: AndroidBridge native notification (works in APK background)
+    if (bridge?.showForegroundNotification) {
+      try {
+        bridge.showForegroundNotification(
+          '🟢 TukTrack — Online',
+          'A partilhar localização em tempo real. Toque para abrir a aplicação.'
+        );
+        return;
+      } catch (e) {
+        console.warn('[Bridge] showForegroundNotification failed:', e);
+      }
+    }
+
+    // Fallback: Web Notification API (works on web / when bridge unavailable)
+    if ('Notification' in window) {
+      let permission = Notification.permission;
+      if (permission === 'default') {
+        permission = await Notification.requestPermission();
+      }
+      if (permission === 'granted') {
+        new Notification('🟢 TukTrack — Online', {
+          body: 'A partilhar localização em tempo real. Toque para abrir a aplicação.',
+          icon: '/icons/icon-192x192.png',
+          tag: 'tuktrack-online',
+          silent: true,
+        });
+      }
+    }
+  };
+
+  const hideOnlineNotification = () => {
+    const bridge = (window as any).AndroidBridge;
+    if (bridge?.hideForegroundNotification) {
+      try { bridge.hideForegroundNotification(); } catch (e) {}
+    }
+  };
+
   const startBackgroundLocation = (): boolean => {
     if (!(window as any).median?.backgroundLocation) return false;
     try {
@@ -709,8 +717,6 @@ export default function DriverDashboard() {
         // Always update map immediately
         setCurrentCoords({ lat, lng });
         setLocationStatus('active');
-        // Keep notification body fresh with latest position
-        sendWorkerMessage('UPDATE_NOTIFICATION', { lat, lng });
 
         // Throttle Firestore writes to every 5 seconds
         const now = Date.now();
@@ -803,29 +809,15 @@ export default function DriverDashboard() {
             setIsOnline(true);
             setLocationStatus('active');
 
-            // ── Show persistent system notification ──────────────────────────
-            // Works in background: driver can lock screen and location keeps
-            // updating; tapping the notification reopens the dashboard.
-            (async () => {
-              const granted = await requestNotificationPermission();
-              if (granted) {
-                await registerLocationWorker();
-                await sendWorkerMessage('GO_ONLINE');
-              }
-            })();
-
             // STEP 2: Request permissions sequentially AFTER tracking starts
-            // This way location always works even if driver skips permissions
-            if ((window as any).median) {
-              // Request "Appear on top" (overlay) permission
-              if (!overlayPermissionGranted.current) {
-                setTimeout(() => setShowOverlayPermissionModal(true), 800);
-              }
-              // Request background location permission (after overlay modal)
-              else if (!backgroundLocationGranted.current) {
-                setTimeout(() => setShowBackgroundPermissionModal(true), 800);
-              }
+            // Always show — works in APK (AndroidBridge) and web fallback
+            if (!overlayPermissionGranted.current) {
+              setTimeout(() => setShowOverlayPermissionModal(true), 800);
+            } else if (!backgroundLocationGranted.current) {
+              setTimeout(() => setShowBackgroundPermissionModal(true), 800);
             }
+            // STEP 3: Show persistent foreground notification via AndroidBridge
+            showOnlineNotification();
           } catch (err) {
             console.error('Failed to update online status:', err);
           } finally {
@@ -900,7 +892,7 @@ export default function DriverDashboard() {
         lastUpdated: serverTimestamp()
       });
       setIsOnline(false);
-      sendWorkerMessage('GO_OFFLINE');
+      hideOnlineNotification();
     } catch (err: any) {
       handleFirestoreError(err, 'update', `users/${user.uid}`);
     } finally {
@@ -1754,21 +1746,38 @@ export default function DriverDashboard() {
                 <button
                   onClick={async () => {
                     setShowOverlayPermissionModal(false);
-                    overlayPermissionGranted.current = true;
-                    localStorage.setItem('tuktrack_overlay_granted', 'true');
-                    // Request SYSTEM_ALERT_WINDOW permission
-                    if ((window as any).median?.permissions) {
-                      try {
-                        await (window as any).median.permissions.request({
-                          permission: 'android.permission.SYSTEM_ALERT_WINDOW'
-                        });
-                      } catch (e) {
-                        console.warn('Overlay permission request failed:', e);
+                    // Use AndroidBridge (from fixed MainActivity.kt)
+                    const bridge = (window as any).AndroidBridge;
+                    if (bridge?.openOverlaySettings) {
+                      bridge.openOverlaySettings();
+                      // Poll until granted then proceed
+                      let checks = 0;
+                      const poll = setInterval(() => {
+                        checks++;
+                        if (bridge.isOverlayGranted?.()) {
+                          overlayPermissionGranted.current = true;
+                          localStorage.setItem('tuktrack_overlay_granted', 'true');
+                          clearInterval(poll);
+                          if (!backgroundLocationGranted.current) {
+                            setTimeout(() => setShowBackgroundPermissionModal(true), 800);
+                          }
+                        }
+                        if (checks >= 40) {
+                          clearInterval(poll);
+                          overlayPermissionGranted.current = true;
+                          localStorage.setItem('tuktrack_overlay_granted', 'true');
+                          if (!backgroundLocationGranted.current) {
+                            setTimeout(() => setShowBackgroundPermissionModal(true), 800);
+                          }
+                        }
+                      }, 500);
+                    } else {
+                      // Fallback for non-Android / web
+                      overlayPermissionGranted.current = true;
+                      localStorage.setItem('tuktrack_overlay_granted', 'true');
+                      if (!backgroundLocationGranted.current) {
+                        setTimeout(() => setShowBackgroundPermissionModal(true), 800);
                       }
-                    }
-                    // tracking already running — now show background location modal
-                    if (!backgroundLocationGranted.current) {
-                      setTimeout(() => setShowBackgroundPermissionModal(true), 800);
                     }
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm"
@@ -1822,15 +1831,32 @@ export default function DriverDashboard() {
                 <button
                   onClick={() => {
                     setShowBackgroundPermissionModal(false);
-                    backgroundLocationGranted.current = true;
-                    localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                    // Open Android app settings directly — works without any paid plugin
-                    // Driver manually sets Location → "Allow all the time" there
-                    if ((window as any).median?.share?.openBrowser) {
-                      (window as any).median.share.openBrowser({ url: 'package:' + 'co.median.android.bnead' });
+                    const bridge = (window as any).AndroidBridge;
+                    if (bridge?.requestBackgroundLocation) {
+                      // Fixed MainActivity enforces the two-step flow:
+                      // 1. Grant ACCESS_FINE_LOCATION first
+                      // 2. Then ACCESS_BACKGROUND_LOCATION → shows "Allow all the time"
+                      bridge.requestBackgroundLocation();
+                      let checks = 0;
+                      const poll = setInterval(() => {
+                        checks++;
+                        if (bridge.isBackgroundLocationGranted?.()) {
+                          backgroundLocationGranted.current = true;
+                          localStorage.setItem('tuktrack_bg_location_granted', 'true');
+                          clearInterval(poll);
+                        }
+                        if (checks >= 40) {
+                          clearInterval(poll);
+                          // Fallback: open app settings page
+                          bridge.openLocationSettings?.();
+                          backgroundLocationGranted.current = true;
+                          localStorage.setItem('tuktrack_bg_location_granted', 'true');
+                        }
+                      }, 500);
                     } else {
-                      // Fallback: show alert with manual instructions
-                      alert('Para ativar localizacao em segundo plano: Definicoes > Aplicacoes > TukTrack > Permissoes > Localizacao > Permitir sempre');
+                      backgroundLocationGranted.current = true;
+                      localStorage.setItem('tuktrack_bg_location_granted', 'true');
+                      alert('Vá a: Definições → Aplicações → TukTrack → Permissões → Localização → Permitir sempre');
                     }
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
