@@ -1,6 +1,8 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
-apply plugin: 'com.google.gms.google-services'
+// Note: 'com.google.gms.google-services' is applied ONLY after google-services.json
+// is added to android/app/. Uncomment the line below once you add that file.
+// apply plugin: 'com.google.gms.google-services'
 
 android {
     namespace "com.tuktrack.app"
@@ -50,7 +52,7 @@ dependencies {
     // GPS in background (FusedLocationProviderClient)
     implementation 'com.google.android.gms:play-services-location:21.2.0'
 
-    // Firebase Cloud Messaging (push notifications)
-    implementation platform('com.google.firebase:firebase-bom:33.1.0')
-    implementation 'com.google.firebase:firebase-messaging-ktx'
+    // Firebase Cloud Messaging — uncomment after adding google-services.json
+    // implementation platform('com.google.firebase:firebase-bom:33.1.0')
+    // implementation 'com.google.firebase:firebase-messaging-ktx'
 }
