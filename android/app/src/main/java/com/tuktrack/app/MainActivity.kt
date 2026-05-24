@@ -8,7 +8,6 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.webkit.JavascriptInterface
-import android.webkit.WebView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.getcapacitor.BridgeActivity
@@ -16,84 +15,26 @@ import com.getcapacitor.BridgeActivity
 class MainActivity : BridgeActivity() {
 
     companion object {
-        private const val REQUEST_FINE_LOCATION       = 1000
+        private const val REQUEST_FINE_LOCATION = 1000
         private const val REQUEST_BACKGROUND_LOCATION = 1001
-        private const val REQUEST_POST_NOTIFICATIONS  = 1002
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Request POST_NOTIFICATIONS on Android 13+ as soon as the app opens.
-        // Without this, LocalNotifications.requestPermissions() may not show the dialog.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    REQUEST_POST_NOTIFICATIONS
-                )
-            }
-        }
     }
 
     override fun onStart() {
         super.onStart()
-        injectBridge()
+        bridge.webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
     }
 
-    private fun injectBridge() {
-        try {
-            val webView: WebView = bridge.webView
-            webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
-
-            val originalClient = webView.webViewClient
-            webView.webViewClient = object : android.webkit.WebViewClient() {
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    view?.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
-                    view?.evaluateJavascript(
-                        "window.__ANDROID_BRIDGE_READY__ = true; " +
-                        "window.dispatchEvent(new Event('androidBridgeReady'));",
-                        null
-                    )
-                }
-
-                override fun shouldOverrideUrlLoading(
-                    view: WebView?,
-                    request: android.webkit.WebResourceRequest?
-                ): Boolean {
-                    return originalClient?.shouldOverrideUrlLoading(view, request) ?: false
-                }
-            }
-        } catch (e: Exception) {
-            // Bridge not yet ready — onStart() will retry
-        }
-    }
-
-    // ── onRequestPermissionsResult: re-inject bridge after permission dialog closes ──
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        // After any permission dialog, notify JS so it can re-check state
-        try {
-            bridge.webView.evaluateJavascript(
-                "window.dispatchEvent(new Event('permissionResult'));",
-                null
-            )
-        } catch (_: Exception) {}
-    }
-
-    // ────────────────────────────────────────────────────────────────────────────
     inner class AndroidBridge {
 
-        // ── 1. "Display over other apps" ─────────────────────────────────────────
+        // ── Overlay ("appear on top") ────────────────────────────────────────
+        // FIX: Removed FLAG_ACTIVITY_NEW_TASK — that flag caused Android to open
+        // the general overlay list instead of navigating directly to this app's
+        // entry, which also prevented the app from appearing in the list at all
+        // on Android 12+.
         @JavascriptInterface
         fun openOverlaySettings() {
             val intent = Intent(
@@ -112,43 +53,21 @@ class MainActivity : BridgeActivity() {
             }
         }
 
-        // ── 2. POST_NOTIFICATIONS (Android 13+) ──────────────────────────────────
-        @JavascriptInterface
-        fun requestNotificationPermission() {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (ContextCompat.checkSelfPermission(
-                        this@MainActivity, Manifest.permission.POST_NOTIFICATIONS
-                    ) != PackageManager.PERMISSION_GRANTED
-                ) {
-                    ActivityCompat.requestPermissions(
-                        this@MainActivity,
-                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                        REQUEST_POST_NOTIFICATIONS
-                    )
-                }
-            }
-        }
-
-        @JavascriptInterface
-        fun isNotificationGranted(): Boolean {
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ContextCompat.checkSelfPermission(
-                    this@MainActivity, Manifest.permission.POST_NOTIFICATIONS
-                ) == PackageManager.PERMISSION_GRANTED
-            } else {
-                true // below Android 13 notifications are on by default
-            }
-        }
-
-        // ── 3. Background location ("Allow all the time") ────────────────────────
+        // ── Location — two-step flow required on Android 11+ ────────────────
+        // FIX: Android 11+ (API 30+) forbids requesting ACCESS_BACKGROUND_LOCATION
+        // at the same time as foreground location. You MUST grant foreground first,
+        // then request background in a separate call. Skipping step 1 means the
+        // system dialog never shows "Allow all the time".
         @JavascriptInterface
         fun requestBackgroundLocation(): Boolean {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
 
             val fineGranted = ContextCompat.checkSelfPermission(
-                this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION
+                this@MainActivity,
+                Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
 
+            // Step 1: foreground location must be granted first
             if (!fineGranted) {
                 ActivityCompat.requestPermissions(
                     this@MainActivity,
@@ -158,11 +77,13 @@ class MainActivity : BridgeActivity() {
                     ),
                     REQUEST_FINE_LOCATION
                 )
-                return false
+                return false // caller should re-invoke after user responds
             }
 
+            // Step 2: now request background (shows "Allow all the time" option)
             val bgGranted = ContextCompat.checkSelfPermission(
-                this@MainActivity, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                this@MainActivity,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
 
             if (!bgGranted) {
@@ -180,11 +101,14 @@ class MainActivity : BridgeActivity() {
         fun isBackgroundLocationGranted(): Boolean {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
             return ContextCompat.checkSelfPermission(
-                this@MainActivity, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                this@MainActivity,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
         }
 
-        // ── 4. Open app settings ──────────────────────────────────────────────────
+        // ── Fallback: open app's permission settings page directly ───────────
+        // Use this if the user dismissed the dialog or needs to change manually.
+        // They can then tap Permissions → Location → Allow all the time.
         @JavascriptInterface
         fun openLocationSettings() {
             val intent = Intent(
@@ -194,27 +118,13 @@ class MainActivity : BridgeActivity() {
             startActivity(intent)
         }
 
+        // ── General app settings (unchanged) ────────────────────────────────
         @JavascriptInterface
         fun openAppSettings() {
             val intent = Intent(
                 Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                 Uri.parse("package:${packageName}")
             )
-            startActivity(intent)
-        }
-
-        // ── 5. Open notification settings directly ────────────────────────────────
-        @JavascriptInterface
-        fun openNotificationSettings() {
-            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                }
-            } else {
-                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                    data = Uri.parse("package:${packageName}")
-                }
-            }
             startActivity(intent)
         }
     }
