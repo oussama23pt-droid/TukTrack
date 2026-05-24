@@ -836,6 +836,20 @@ export default function DriverDashboard() {
     }
 
     setIsActionLoading(true);
+
+    // Save UID to native SharedPreferences NOW — before geolocation resolves —
+    // so the foreground service can write Firestore via REST if the app is killed.
+    const trySetUid = (attemptsLeft: number) => {
+      try {
+        const bridge = (window as any).AndroidBridge;
+        if (bridge?.setDriverUid) {
+          bridge.setDriverUid(user.uid);
+          return;
+        }
+      } catch (_) {}
+      if (attemptsLeft > 0) setTimeout(() => trySetUid(attemptsLeft - 1), 300);
+    };
+    trySetUid(10);
     try {
       // Explicit permission query
       let state = 'prompt';
@@ -895,9 +909,6 @@ export default function DriverDashboard() {
             // STEP 3: Show persistent status bar notification
             setAppBadge(1);
             try { (window as any).AndroidBridge?.setDriverOnlineState?.(true); } catch(_) {}
-            // Persist UID so the native service can write to Firestore via REST
-            // when the app is killed and the WebView / JS SDK are unavailable.
-            try { (window as any).AndroidBridge?.setDriverUid?.(user?.uid || ''); } catch(_) {}
             showOnlineNotification(
               activeShift?.startedAt ? new Date(activeShift.startedAt) :
               activeShift?.createdAt ? new Date(activeShift.createdAt) :
@@ -1169,22 +1180,38 @@ export default function DriverDashboard() {
     } catch (e) {}
   };
 
+  /**
+   * showOnlineNotification — starts the Android foreground service + persistent notification.
+   *
+   * RETRY LOGIC: AndroidBridge is injected by MainActivity after the WebView page loads,
+   * but on first launch there is a race where the JS resolves getCurrentPosition BEFORE
+   * the native bridge finishes injecting. We retry up to 10 times (every 300 ms = 3 s total)
+   * to handle this race without blocking the UI.
+   */
   const showOnlineNotification = async (shiftStartTime?: Date) => {
-    const bridge = (window as any).AndroidBridge;
-    if (bridge?.showForegroundNotification) {
-      try {
-        const shiftStartMs = shiftStartTime ? shiftStartTime.getTime() : Date.now();
-        bridge.showForegroundNotification(
-          '🟢 TukTrack — Em Serviço',
-          'A partilhar localização em tempo real. Toque para abrir.',
-          shiftStartMs
-        );
-        console.log('[Notif] Foreground service started, timer from:', new Date(shiftStartMs));
-        return;
-      } catch (e) {
-        console.warn('[Bridge] showForegroundNotification failed:', e);
+    const shiftStartMs = shiftStartTime ? shiftStartTime.getTime() : Date.now();
+    const title   = '🟢 TukTrack — Em Serviço';
+    const message = 'A partilhar localização em tempo real. Toque para abrir.';
+
+    const tryShow = (attemptsLeft: number) => {
+      const bridge = (window as any).AndroidBridge;
+      if (bridge?.showForegroundNotification) {
+        try {
+          bridge.showForegroundNotification(title, message, shiftStartMs);
+          console.log('[Notif] Foreground service started at:', new Date(shiftStartMs).toISOString());
+          return;
+        } catch (e) {
+          console.warn('[Bridge] showForegroundNotification error:', e);
+        }
       }
-    }
+      if (attemptsLeft > 0) {
+        setTimeout(() => tryShow(attemptsLeft - 1), 300);
+      } else {
+        console.error('[Bridge] AndroidBridge not available after retries — notification not shown');
+      }
+    };
+
+    tryShow(10); // up to 10 × 300 ms = 3 s of retries
   };
 
 
