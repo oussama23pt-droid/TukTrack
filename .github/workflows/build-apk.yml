@@ -77,7 +77,6 @@ jobs:
               img.save(os.path.join(path, "ic_launcher_round.png"))
               img.save(os.path.join(path, "ic_launcher_foreground.png"))
 
-          if False:  # skip old loop - replaced above
 
           # Notification icon â€” white on transparent (Android requirement)
           for folder, size in [("drawable-mdpi",24),("drawable-hdpi",36),("drawable-xhdpi",48),("drawable-xxhdpi",72),("drawable-xxxhdpi",96)]:
