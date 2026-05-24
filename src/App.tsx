@@ -29,6 +29,8 @@ const DailyEarningsPage = lazy(() => import('./features/gestor/dashboard/DailyEa
 const SettingsPage = lazy(() => import('./features/shared/SettingsPage'));
 const TripsHistory = lazy(() => import('./features/driver/dashboard/TripsHistory'));
 const EarningsPage = lazy(() => import('./features/driver/dashboard/EarningsPage'));
+const MessagesPage = lazy(() => import('./features/driver/dashboard/MessagesPage'));
+const ManagerMessagesPage = lazy(() => import('./features/gestor/dashboard/ManagerMessagesPage'));
 const TripsManagement = lazy(() => import('./features/gestor/dashboard/TripsManagement'));
 const SubscriptionSuccess = lazy(() => import('./components/SubscriptionSuccess'));
 const SubscriptionCancel = lazy(() => import('./components/SubscriptionCancel'));
@@ -60,6 +62,7 @@ function ManagerRoutes() {
           <Route path="reports" element={<DashboardLayout role="manager"><ReportsPage /></DashboardLayout>} />
           <Route path="daily-earnings" element={<DashboardLayout role="manager"><DailyEarningsPage /></DashboardLayout>} />
           <Route path="settings" element={<DashboardLayout role="manager"><SettingsPage /></DashboardLayout>} />
+          <Route path="messages" element={<DashboardLayout role="manager"><ManagerMessagesPage /></DashboardLayout>} />
         </Routes>
       </Suspense>
     </SubscriptionGuard>
@@ -112,6 +115,7 @@ export default function App() {
                     <Route path="/subscription/cancel" element={<SubscriptionCancel />} />
                     <Route path="/driver/dashboard" element={<DashboardLayout role="driver"><DriverDashboard /></DashboardLayout>} />
                     <Route path="/driver/trips" element={<DashboardLayout role="driver"><TripsHistory /></DashboardLayout>} />
+                    <Route path="/driver/messages" element={<DashboardLayout role="driver"><MessagesPage /></DashboardLayout>} />
                     <Route path="/driver/earnings" element={<DashboardLayout role="driver"><EarningsPage /></DashboardLayout>} />
                     <Route path="/driver/settings" element={<DashboardLayout role="driver"><SettingsPage /></DashboardLayout>} />
                     <Route path="*" element={<UnifiedLoginPage />} />
