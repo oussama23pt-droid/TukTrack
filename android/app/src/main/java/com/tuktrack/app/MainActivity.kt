@@ -33,6 +33,8 @@ class MainActivity : BridgeActivity() {
     }
 
     // Receives GPS coords from LocationForegroundService → forwards to WebView
+    // This runs while the app is in the foreground or background (but NOT killed).
+    // When the app is killed the service writes directly to Firestore via REST.
     private val locationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != "com.tuktrack.LOCATION_UPDATE") return
@@ -85,7 +87,6 @@ class MainActivity : BridgeActivity() {
         try { unregisterReceiver(locationReceiver) } catch (_: Exception) {}
     }
 
-    // After any system permission dialog closes, tell JS to re-check
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
@@ -96,7 +97,6 @@ class MainActivity : BridgeActivity() {
         } catch (_: Exception) {}
     }
 
-    // Re-check when driver returns from Settings screen
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         try {
@@ -110,8 +110,10 @@ class MainActivity : BridgeActivity() {
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_ONLINE, "TukTrack Online Status",
-                    NotificationManager.IMPORTANCE_DEFAULT).apply {
-                    description = "Mostra enquanto o motorista partilha localização"
+                    // IMPORTANCE_LOW: persistent, no sound, cannot be dismissed on stock Android.
+                    // Samsung One UI also respects LOW for foreground services.
+                    NotificationManager.IMPORTANCE_LOW).apply {
+                    description          = "Mostra enquanto o motorista partilha localização"
                     setShowBadge(false)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                     setSound(null, null)
@@ -121,7 +123,7 @@ class MainActivity : BridgeActivity() {
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_ALERTS, "TukTrack Alertas",
                     NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "SOS, turno, GPS e mensagens"
+                    description          = "SOS, turno, GPS e mensagens"
                     setShowBadge(true)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                     enableVibration(true)
@@ -166,7 +168,13 @@ class MainActivity : BridgeActivity() {
 
     inner class AndroidBridge {
 
-        // ── 1. NON-DISMISSABLE FOREGROUND SERVICE NOTIFICATION ───────────────────
+        // ── 1. NON-DISMISSABLE FOREGROUND SERVICE NOTIFICATION ──────────────────
+        /**
+         * Called by JS when driver presses the ONLINE button.
+         *
+         * KEY: saves driver_uid to SharedPreferences so LocationForegroundService
+         *      can write directly to Firestore via REST when the WebView is gone.
+         */
         @JavascriptInterface
         fun showForegroundNotification(title: String, message: String, shiftStartMs: Long = 0L) {
             if (!hasNotificationPermission()) {
@@ -174,14 +182,14 @@ class MainActivity : BridgeActivity() {
                     arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATION)
                 return
             }
+            val realStart = if (shiftStartMs > 0) shiftStartMs else System.currentTimeMillis()
             getSharedPreferences("tuktrack", Context.MODE_PRIVATE).edit()
                 .putBoolean("driver_was_online", true)
-                .putLong("shift_start_ms", if (shiftStartMs > 0) shiftStartMs else System.currentTimeMillis())
+                .putLong("shift_start_ms", realStart)
                 .apply()
 
             val svc = Intent(this@MainActivity, LocationForegroundService::class.java).apply {
-                putExtra(LocationForegroundService.EXTRA_SHIFT_START,
-                    if (shiftStartMs > 0) shiftStartMs else System.currentTimeMillis())
+                putExtra(LocationForegroundService.EXTRA_SHIFT_START, realStart)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 startForegroundService(svc)
@@ -192,8 +200,25 @@ class MainActivity : BridgeActivity() {
         @JavascriptInterface
         fun hideForegroundNotification() {
             getSharedPreferences("tuktrack", Context.MODE_PRIVATE).edit()
-                .putBoolean("driver_was_online", false).apply()
+                .putBoolean("driver_was_online", false)
+                .remove("driver_uid")   // clear uid when going offline
+                .apply()
             stopService(Intent(this@MainActivity, LocationForegroundService::class.java))
+        }
+
+        /**
+         * Called by JS to persist the driver's Firebase UID in SharedPreferences.
+         * LocationForegroundService reads this to write location via REST when the
+         * app is killed and the WebView / Firestore JS SDK are unavailable.
+         *
+         * Call this BEFORE showForegroundNotification (or at the same time).
+         */
+        @JavascriptInterface
+        fun setDriverUid(uid: String) {
+            if (uid.isBlank()) return
+            getSharedPreferences("tuktrack", Context.MODE_PRIVATE).edit()
+                .putString("driver_uid", uid)
+                .apply()
         }
 
         // ── 2. ALERT NOTIFICATIONS (SOS, shift, GPS, messages) ──────────────────
@@ -234,11 +259,6 @@ class MainActivity : BridgeActivity() {
                 Settings.canDrawOverlays(this@MainActivity) else true
 
         // ── 4. BACKGROUND LOCATION ───────────────────────────────────────────────
-        // openBackgroundLocationSettings() — THE CORRECT FIX
-        // Goes directly to the app's Location permission page in Settings where
-        // the driver can tap "Allow all the time" with one tap.
-        // This avoids the system dialog which does NOT show "Allow all the time"
-        // on Android 11+ when called from requestPermissions().
         @JavascriptInterface
         fun openBackgroundLocationSettings() {
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
@@ -248,7 +268,6 @@ class MainActivity : BridgeActivity() {
             startActivity(intent)
         }
 
-        // Legacy — kept for compatibility but now just opens Settings directly
         @JavascriptInterface
         fun requestBackgroundLocation(): Boolean {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
