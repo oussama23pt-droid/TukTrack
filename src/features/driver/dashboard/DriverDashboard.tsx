@@ -350,7 +350,8 @@ export default function DriverDashboard() {
     return () => { _store.onCoordsUpdate = null; };
   }, []);
 
-  // Monitor GPS status and notify manager if disabled while online
+  // Monitor GPS status — block driver from turning off GPS while online,
+  // and notify manager when GPS is lost or restored
   useEffect(() => {
     if (!user || !userData?.managerId || !isOnline) {
       gpsWarningSentRef.current = false;
@@ -360,10 +361,9 @@ export default function DriverDashboard() {
     const sendGpsNotification = async (type: 'gps_disabled' | 'gps_restored') => {
       try {
         const title = type === 'gps_disabled' ? '⚠️ GPS DESATIVADO' : '✅ GPS RESTAURADO';
-        const message = type === 'gps_disabled' 
-          ? `O motorista ${userData.name} desativou a localização ou perdeu o sinal GPS.` 
+        const message = type === 'gps_disabled'
+          ? `O motorista ${userData.name} desativou a localização ou perdeu o sinal GPS.`
           : `O motorista ${userData.name} restaurou a ligação GPS.`;
-
         await addDoc(collection(db, 'notifications'), {
           managerId: userData.managerId,
           type: type === 'gps_disabled' ? 'alert' : 'info',
@@ -381,8 +381,26 @@ export default function DriverDashboard() {
     };
 
     if (locationStatus === 'disabled' && !gpsWarningSentRef.current) {
+      // ── GPS WAS TURNED OFF WHILE DRIVER IS ONLINE ────────────────────────────
+      // 1. Notify manager immediately
       sendGpsNotification('gps_disabled');
       gpsWarningSentRef.current = true;
+
+      // 2. Show blocking alert to driver — they must go offline before disabling GPS
+      // Use a small timeout so it appears AFTER the system GPS-off dialog closes
+      setTimeout(() => {
+        alert(
+          '⚠️ GPS Desativado!\n\n' +
+          'Não pode desativar a localização enquanto está em serviço.\n\n' +
+          'Por favor reactive o GPS ou saia de serviço primeiro.'
+        );
+        // Try to re-open location settings so driver can turn it back on
+        const bridge = (window as any).AndroidBridge;
+        if (bridge?.openLocationSettings) {
+          bridge.openLocationSettings();
+        }
+      }, 500);
+
     } else if (locationStatus === 'active' && gpsWarningSentRef.current) {
       sendGpsNotification('gps_restored');
       gpsWarningSentRef.current = false;
@@ -890,7 +908,6 @@ export default function DriverDashboard() {
       _store.isOnline = false; // stop Median callback writes immediately
       _store.latestCoords = null;
       lastUpdateRef.current = 0; // reset throttle — next go-online writes position immediately
-      stopLocationTracking();
       stopLocationTracking();
       await updateDoc(doc(db, 'users', user.uid), {
         isOnline: false,
