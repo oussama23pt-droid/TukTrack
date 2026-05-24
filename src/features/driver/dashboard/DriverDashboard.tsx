@@ -221,6 +221,45 @@ export default function DriverDashboard() {
     return () => unsubNotify();
   }, [userData?.managerId]);
 
+  // ── NATIVE LOCATION LISTENER ───────────────────────────────────────────────
+  // LocationForegroundService (Kotlin) sends GPS coords via BroadcastReceiver
+  // → MainActivity forwards them to WebView as 'nativeLocationUpdate' event.
+  // This runs even when the app is in background / screen is off.
+  useEffect(() => {
+    const handleNativeLocation = async (e: Event) => {
+      const { latitude: lat, longitude: lng, accuracy } = (e as CustomEvent).detail;
+      if (!lat || !lng) return;
+
+      // Always update the map marker
+      setCurrentCoords({ lat, lng });
+      setLocationStatus('active');
+      _store.latestCoords = { lat, lng };
+      if (_store.onCoordsUpdate) _store.onCoordsUpdate({ lat, lng });
+
+      // Throttle Firestore writes to max once per 5s
+      const uid = _store.uid || user?.uid;
+      if (!uid || !_store.isOnline) return;
+      const now = Date.now();
+      if (now - _store.lastFirestoreWrite < 5000) return;
+      _store.lastFirestoreWrite = now;
+
+      try {
+        await updateDoc(doc(db, 'users', uid), {
+          location: { lat, lng, updatedAt: new Date().toISOString() },
+          currentLat: lat,
+          currentLng: lng,
+          locationAccuracy: accuracy ?? null,
+          lastUpdated: serverTimestamp(),
+        });
+      } catch (err) {
+        console.error('[NativeGPS] Firestore write failed:', err);
+      }
+    };
+
+    window.addEventListener('nativeLocationUpdate', handleNativeLocation);
+    return () => window.removeEventListener('nativeLocationUpdate', handleNativeLocation);
+  }, [user?.uid]);
+
   const [showStopsList, setShowStopsList] = useState(false);
   const [stopsListTrip, setStopsListTrip] = useState<any | null>(null);
 
@@ -820,8 +859,11 @@ export default function DriverDashboard() {
             } else if (!backgroundLocationGranted.current) {
               setTimeout(() => setShowBackgroundPermissionModal(true), 800);
             }
-            // STEP 3: Show persistent status bar notification
+            // STEP 3: Persist online state for BootReceiver + show notification
             setAppBadge(1);
+            try {
+              (window as any).AndroidBridge?.setDriverOnlineState?.(true);
+            } catch (_) {}
             showOnlineNotification(
               activeShift?.startedAt ? new Date(activeShift.startedAt) :
               activeShift?.createdAt ? new Date(activeShift.createdAt) :
@@ -902,6 +944,9 @@ export default function DriverDashboard() {
       });
       setIsOnline(false);
       hideOnlineNotification();
+      try {
+        (window as any).AndroidBridge?.setDriverOnlineState?.(false);
+      } catch (_) {}
     setAppBadge(0);
     } catch (err: any) {
       handleFirestoreError(err, 'update', `users/${user.uid}`);
