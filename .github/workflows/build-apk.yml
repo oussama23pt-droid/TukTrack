@@ -43,54 +43,73 @@ jobs:
         run: |
           cd android
           mkdir -p gradle/wrapper
-          curl -L -o gradle/wrapper/gradle-wrapper.jar \
-            https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar
+          curl -fL -o /tmp/gradle-8.4-bin.zip \
+            https://services.gradle.org/distributions/gradle-8.4-bin.zip
+          unzip -q /tmp/gradle-8.4-bin.zip -d /tmp/gradle-dist
+          /tmp/gradle-dist/gradle-8.4/bin/gradle wrapper --gradle-version 8.4
+          chmod +x gradlew
 
-      - name: Generate missing app icons
+      - name: Generate app icons and ic_stat_icon drawable
         run: |
-          sudo apt-get install -y imagemagick
-          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            dir="android/app/src/main/res/mipmap-${density}"
-            mkdir -p "$dir"
-            size=48
-            [ "$density" = "hdpi" ]    && size=72
-            [ "$density" = "xhdpi" ]   && size=96
-            [ "$density" = "xxhdpi" ]  && size=144
-            [ "$density" = "xxxhdpi" ] && size=192
-            convert -size ${size}x${size} xc:#0f172a \
-              -fill '#f59e0b' -draw "circle $((size/2)),$((size/2)) $((size/2)),4" \
-              "$dir/ic_launcher.png"
-            cp "$dir/ic_launcher.png" "$dir/ic_launcher_round.png"
-            cp "$dir/ic_launcher.png" "$dir/ic_launcher_foreground.png"
+          sudo apt-get install -y imagemagick 2>/dev/null || true
+          pip install pillow --quiet
+
+          python3 - << 'PYEOF'
+          from PIL import Image, ImageDraw
+          import os
+
+          base = "android/app/src/main/res"
+
+          # Launcher icons â€” amber circle
+          for folder, size in [("mipmap-mdpi",48),("mipmap-hdpi",72),("mipmap-xhdpi",96),("mipmap-xxhdpi",144),("mipmap-xxxhdpi",192)]:
+              path = os.path.join(base, folder)
+              os.makedirs(path, exist_ok=True)
+              img = Image.new("RGBA", (size, size), (0,0,0,0))
+              ImageDraw.Draw(img).ellipse([0,0,size-1,size-1], fill=(245,158,11,255))
+              img.save(os.path.join(path, "ic_launcher.png"))
+              img.save(os.path.join(path, "ic_launcher_round.png"))
+              img.save(os.path.join(path, "ic_launcher_foreground.png"))
+
+          # Notification icon â€” white on transparent (Android requirement)
+          for folder, size in [("drawable-mdpi",24),("drawable-hdpi",36),("drawable-xhdpi",48),("drawable-xxhdpi",72),("drawable-xxxhdpi",96)]:
+              path = os.path.join(base, folder)
+              os.makedirs(path, exist_ok=True)
+              img = Image.new("RGBA", (size, size), (0,0,0,0))
+              m = size // 6
+              ImageDraw.Draw(img).ellipse([m, m, size-m-1, size-m-1], fill=(255,255,255,255))
+              img.save(os.path.join(path, "ic_stat_icon.png"))
+
+          # Also create default drawable folder with ic_stat_icon
+          path = os.path.join(base, "drawable")
+          os.makedirs(path, exist_ok=True)
+          img = Image.new("RGBA", (48, 48), (0,0,0,0))
+          ImageDraw.Draw(img).ellipse([6, 6, 41, 41], fill=(255,255,255,255))
+          img.save(os.path.join(path, "ic_stat_icon.png"))
+          print("All icons generated successfully")
+          PYEOF
+
+      - name: Patch all Kotlin files to use ic_stat_icon
+        run: |
+          # Replace any R.drawable.* reference in our Kotlin files with ic_stat_icon
+          for FILE in \
+            android/app/src/main/java/com/tuktrack/app/MainActivity.kt \
+            android/app/src/main/java/com/tuktrack/app/LocationForegroundService.kt \
+            android/app/src/main/java/com/tuktrack/app/ForegroundLocationService.kt; do
+            if [ -f "$FILE" ]; then
+              sed -i 's/android\.R\.drawable\.[a-zA-Z_]*/R.drawable.ic_stat_icon/g' "$FILE"
+              sed -i 's/R\.drawable\.[a-zA-Z_]*/R.drawable.ic_stat_icon/g' "$FILE"
+              echo "Patched: $FILE"
+            fi
           done
-
-      - name: Create missing drawable resource
-        run: |
-          mkdir -p android/app/src/main/res/drawable
-          cat > android/app/src/main/res/drawable/ic_stat_icon_default.xml << 'EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp"
-              android:height="24dp"
-              android:viewportWidth="24"
-              android:viewportHeight="24">
-            <path
-                android:fillColor="#FFFFFF"
-                android:pathData="M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7,-7.75 7,-13c0,-3.87 -3.13,-7 -7,-7zM12,11.5c-1.38,0 -2.5,-1.12 -2.5,-2.5s1.12,-2.5 2.5,-2.5 2.5,1.12 2.5,2.5 -1.12,2.5 -2.5,2.5z"/>
-          </vector>
-          EOF
-
-      - name: Fix ForegroundLocationService drawable reference
-        run: |
-          FILE="android/app/src/main/java/com/tuktrack/app/ForegroundLocationService.kt"
-          if [ -f "$FILE" ]; then
-            sed -i 's/R\.drawable\.[a-zA-Z_]*/R.drawable.ic_stat_icon_default/g' "$FILE"
-          fi
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
       - name: Build debug APK
         run: cd android && ./gradlew assembleDebug --no-daemon
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
