@@ -462,7 +462,7 @@ if ((window as any).median) {
                         trip.status === 'active' ? "bg-blue-50 text-blue-600 border border-blue-100" :
                         "bg-red-50 text-red-600 border border-red-100"
                       )}>
-                        {trip.status === 'completed' ? 'Fim' : trip.status === 'active' ? 'Curso' : 'Canc'}
+                        {trip.status === 'completed' ? 'Fim' : trip.status === 'active' ? 'Curso' : ('Canc' + (trip.cancelReason ? ' — ' + trip.cancelReason.substring(0,30) : ''))}
                       </div>
                     </div>
 
