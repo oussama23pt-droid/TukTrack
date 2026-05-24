@@ -1,5 +1,6 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
+apply plugin: 'com.google.gms.google-services'
 
 android {
     namespace "com.tuktrack.app"
@@ -8,8 +9,8 @@ android {
         applicationId "com.tuktrack.app"
         minSdk 23
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
@@ -45,4 +46,11 @@ dependencies {
     implementation project(':capacitor-app')
     implementation project(':capacitor-local-notifications')
     implementation project(':capacitor-community-background-geolocation')
+
+    // GPS in background (FusedLocationProviderClient)
+    implementation 'com.google.android.gms:play-services-location:21.2.0'
+
+    // Firebase Cloud Messaging (push notifications)
+    implementation platform('com.google.firebase:firebase-bom:33.1.0')
+    implementation 'com.google.firebase:firebase-messaging-ktx'
 }
