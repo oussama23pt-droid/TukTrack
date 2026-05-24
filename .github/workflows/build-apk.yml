@@ -40,8 +40,13 @@ jobs:
       - name: Capacitor sync
         run: npx cap sync android
 
-      - name: Make gradlew executable
-        run: chmod +x android/gradlew
+      - name: Fix Gradle wrapper jar
+        run: |
+          cd android
+          mkdir -p gradle/wrapper
+          curl -o gradle/wrapper/gradle-wrapper.jar \
+            https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar
+          chmod +x gradlew
 
       - name: Build debug APK
         run: cd android && ./gradlew assembleDebug --no-daemon
