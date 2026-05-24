@@ -5,7 +5,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -27,21 +30,54 @@ class MainActivity : BridgeActivity() {
         private const val REQUEST_NOTIFICATION        = 1002
         private const val CHANNEL_ONLINE              = "tuktrack_online"
         private const val CHANNEL_ALERTS              = "tuktrack_alerts"
-        private const val NOTIFICATION_ONLINE_ID      = 1001
+    }
+
+    // Receives GPS coords from LocationForegroundService and forwards to WebView JS
+    private val locationReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != "com.tuktrack.LOCATION_UPDATE") return
+            val lat = intent.getDoubleExtra("lat", 0.0)
+            val lng = intent.getDoubleExtra("lng", 0.0)
+            val acc = intent.getFloatExtra("accuracy", 0f)
+            try {
+                bridge.webView.post {
+                    bridge.webView.evaluateJavascript(
+                        """
+                        (function(){
+                          var e = new CustomEvent('nativeLocationUpdate', {
+                            detail: { latitude: $lat, longitude: $lng, accuracy: $acc }
+                          });
+                          window.dispatchEvent(e);
+                          if (typeof window.medianLocationUpdated === 'function') {
+                            window.medianLocationUpdated({ latitude: $lat, longitude: $lng, accuracy: $acc });
+                          }
+                        })();
+                        """.trimIndent(), null
+                    )
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         createNotificationChannels()
 
-        // Request POST_NOTIFICATIONS immediately on Android 13+ so LocalNotifications
-        // and our AndroidBridge notifications both work without extra prompts
+        // Request POST_NOTIFICATIONS on Android 13+ immediately
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this,
                     arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATION)
             }
+        }
+
+        // Register receiver for GPS updates from the foreground service
+        val filter = IntentFilter("com.tuktrack.LOCATION_UPDATE")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(locationReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(locationReceiver, filter)
         }
     }
 
@@ -50,7 +86,18 @@ class MainActivity : BridgeActivity() {
         injectBridge()
     }
 
-    // After any permission dialog closes, fire a JS event so the UI can re-check state
+    override fun onResume() {
+        super.onResume()
+        // Re-inject bridge after app comes back from background
+        injectBridge()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try { unregisterReceiver(locationReceiver) } catch (_: Exception) {}
+    }
+
+    // After any permission dialog closes, fire JS event so the UI can re-check state
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
@@ -65,17 +112,19 @@ class MainActivity : BridgeActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(NotificationManager::class.java)
 
-            // Channel 1: persistent "driver is online" — no sound, non-dismissable
+            // Channel 1: persistent driver-online — silent, non-dismissable, top of shade
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_ONLINE, "TukTrack Online Status",
-                    NotificationManager.IMPORTANCE_LOW).apply {
+                    NotificationManager.IMPORTANCE_DEFAULT).apply {
                     description = "Mostra enquanto o motorista partilha localização"
                     setShowBadge(false)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                    setSound(null, null)
+                    enableVibration(false)
                 }
             )
 
-            // Channel 2: alert notifications (SOS, shift, GPS, messages)
+            // Channel 2: alert notifications — SOS, shift start, GPS events, messages
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_ALERTS, "TukTrack Alertas",
                     NotificationManager.IMPORTANCE_HIGH).apply {
@@ -105,7 +154,7 @@ class MainActivity : BridgeActivity() {
                     view: WebView?, request: android.webkit.WebResourceRequest?
                 ) = originalClient?.shouldOverrideUrlLoading(view, request) ?: false
             }
-        } catch (e: Exception) {}
+        } catch (_: Exception) {}
     }
 
     private fun hasNotificationPermission(): Boolean {
@@ -126,10 +175,10 @@ class MainActivity : BridgeActivity() {
 
     inner class AndroidBridge {
 
-        // ── 1. FOREGROUND SERVICE NOTIFICATION (non-dismissable) ─────────────────
-        // Uses LocationForegroundService which calls startForeground() —
-        // the ONLY type of notification Android prevents users from dismissing.
-        // The notification shows a live timer ticking from shiftStartMs.
+        // ── 1. START FOREGROUND SERVICE (sticky non-dismissable notification) ────
+        // Starts LocationForegroundService → startForeground() → notification that
+        // Android CANNOT let the user swipe away even with "Clear all".
+        // The service runs even when the screen is off and the app is in background.
         @JavascriptInterface
         fun showForegroundNotification(title: String, message: String, shiftStartMs: Long = 0L) {
             if (!hasNotificationPermission()) {
@@ -137,6 +186,12 @@ class MainActivity : BridgeActivity() {
                     arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATION)
                 return
             }
+            // Save online state so BootReceiver can restart after reboot
+            getSharedPreferences("tuktrack", Context.MODE_PRIVATE).edit()
+                .putBoolean("driver_was_online", true)
+                .putLong("shift_start_ms", if (shiftStartMs > 0) shiftStartMs else System.currentTimeMillis())
+                .apply()
+
             val svcIntent = Intent(this@MainActivity, LocationForegroundService::class.java).apply {
                 putExtra(LocationForegroundService.EXTRA_SHIFT_START,
                     if (shiftStartMs > 0) shiftStartMs else System.currentTimeMillis())
@@ -150,12 +205,15 @@ class MainActivity : BridgeActivity() {
 
         @JavascriptInterface
         fun hideForegroundNotification() {
-            // Stopping the service removes its startForeground notification automatically
+            // Clear online state so BootReceiver does NOT restart after reboot
+            getSharedPreferences("tuktrack", Context.MODE_PRIVATE).edit()
+                .putBoolean("driver_was_online", false)
+                .apply()
             stopService(Intent(this@MainActivity, LocationForegroundService::class.java))
         }
 
-        // ── 2. ALERT NOTIFICATIONS (messages, SOS, GPS events) ──────────────────
-        // These CAN be dismissed — used for messages and alerts
+        // ── 2. ALERT NOTIFICATIONS (messages, SOS, shift, GPS events) ───────────
+        // These CAN be dismissed — high priority so they pop up on screen
         @JavascriptInterface
         fun showAlertNotification(title: String, message: String, notifId: Int) {
             if (!hasNotificationPermission()) return
@@ -163,17 +221,19 @@ class MainActivity : BridgeActivity() {
             val notification = NotificationCompat.Builder(this@MainActivity, CHANNEL_ALERTS)
                 .setContentTitle(title)
                 .setContentText(message)
-                .setSmallIcon(android.R.drawable.ic_dialog_email)
+                .setSmallIcon(R.drawable.ic_stat_icon)
                 .setContentIntent(buildTapIntent())
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
+                // Show full text even when notification is collapsed
+                .setStyle(NotificationCompat.BigTextStyle().bigText(message))
                 .build()
 
             try {
                 NotificationManagerCompat.from(this@MainActivity).notify(notifId, notification)
-            } catch (e: SecurityException) {}
+            } catch (_: SecurityException) {}
         }
 
         @JavascriptInterface
@@ -181,7 +241,7 @@ class MainActivity : BridgeActivity() {
             NotificationManagerCompat.from(this@MainActivity).cancel(notifId)
         }
 
-        // ── 3. GPS / OVERLAY / LOCATION PERMISSIONS ──────────────────────────────
+        // ── 3. PERMISSION HELPERS ────────────────────────────────────────────────
 
         @JavascriptInterface
         fun openOverlaySettings() {
@@ -221,6 +281,7 @@ class MainActivity : BridgeActivity() {
                 Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
         }
 
+        // Opens app settings directly — used when permission is permanently denied
         @JavascriptInterface
         fun openLocationSettings() {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
@@ -233,7 +294,6 @@ class MainActivity : BridgeActivity() {
                 Uri.parse("package:${packageName}")))
         }
 
-        // ── 4. OPEN NOTIFICATION SETTINGS directly ────────────────────────────────
         @JavascriptInterface
         fun openNotificationSettings() {
             val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -246,6 +306,33 @@ class MainActivity : BridgeActivity() {
                 }
             }
             startActivity(intent)
+        }
+
+        // ── 4. APP KEEP-ALIVE HELPERS ────────────────────────────────────────────
+
+        // Called by JS to confirm the driver is still online — persists to SharedPrefs
+        // so BootReceiver can restart the service after phone reboot
+        @JavascriptInterface
+        fun setDriverOnlineState(isOnline: Boolean) {
+            getSharedPreferences("tuktrack", Context.MODE_PRIVATE).edit()
+                .putBoolean("driver_was_online", isOnline)
+                .apply()
+        }
+
+        @JavascriptInterface
+        fun isDriverOnline(): Boolean {
+            return getSharedPreferences("tuktrack", Context.MODE_PRIVATE)
+                .getBoolean("driver_was_online", false)
+        }
+
+        // Check if the foreground service is currently running
+        @JavascriptInterface
+        fun isServiceRunning(): Boolean {
+            val manager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            @Suppress("DEPRECATION")
+            return manager.getRunningServices(Int.MAX_VALUE).any {
+                it.service.className == LocationForegroundService::class.java.name
+            }
         }
     }
 }
