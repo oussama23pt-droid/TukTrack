@@ -16,7 +16,7 @@ export default function TripsHistory() {
     const tripsQuery = query(
       collection(db, 'trips'),
       where('driverUid', '==', user.uid),
-      where('status', '==', 'completed'),
+      where('status', 'in', ['completed', 'cancelled']),
       orderBy('createdAt', 'desc')
     );
 
@@ -70,7 +70,11 @@ export default function TripsHistory() {
                   </div>
                 )}
               </div>
-              <span className="text-[10px] bg-green-50 text-green-600 px-3 py-1 rounded-full uppercase font-black tracking-widest border border-green-100">
+              <span className={`text-[10px] px-3 py-1 rounded-full uppercase font-black tracking-widest border ${
+                trip.status === 'cancelled'
+                  ? 'bg-red-50 text-red-500 border-red-100'
+                  : 'bg-green-50 text-green-600 border-green-100'
+              }`}>
                 Concluído
               </span>
             </div>
