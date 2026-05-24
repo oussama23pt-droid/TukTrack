@@ -220,7 +220,9 @@ export default function GestorDashboard() {
     }
   };
 
-  const todayEarnings = todayTrips.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+  const todayEarnings = todayTrips
+    .filter(t => t.status !== 'cancelled')
+    .reduce((acc, curr) => acc + (curr.amount || 0), 0);
 
   const driverRanking = useMemo(() => {
     const ranking: Record<string, { earnings: number; trips: number; name: string }> = {};
@@ -232,9 +234,9 @@ export default function GestorDashboard() {
       }
     });
 
-    // Sum earnings and trips for today
+    // Sum earnings and trips for today — exclude cancelled trips
     todayTrips.forEach(trip => {
-      if (trip.driverUid && ranking[trip.driverUid]) {
+      if (trip.driverUid && ranking[trip.driverUid] && trip.status !== 'cancelled') {
         ranking[trip.driverUid].earnings += (trip.amount || 0);
         ranking[trip.driverUid].trips += 1;
       }
