@@ -49,18 +49,13 @@ jobs:
           /tmp/gradle-dist/gradle-8.4/bin/gradle wrapper --gradle-version 8.4
           chmod +x gradlew
 
-      - name: Generate app icons and ic_stat_icon drawable
+      - name: Generate app icons
         run: |
-          sudo apt-get install -y imagemagick 2>/dev/null || true
           pip install pillow --quiet
-
           python3 - << 'PYEOF'
           from PIL import Image, ImageDraw
           import os
-
           base = "android/app/src/main/res"
-
-          # Launcher icons - use blue tuk-tuk from public folder
           src_path = "public/pwa-512x512.png"
           if not os.path.exists(src_path):
               src_path = "public/pwa-192x192.png"
@@ -68,7 +63,6 @@ jobs:
               src_img = Image.open(src_path).convert("RGBA")
           else:
               src_img = Image.new("RGBA", (512,512), (30,100,220,255))
-
           for folder, size in [("mipmap-mdpi",48),("mipmap-hdpi",72),("mipmap-xhdpi",96),("mipmap-xxhdpi",144),("mipmap-xxxhdpi",192)]:
               path = os.path.join(base, folder)
               os.makedirs(path, exist_ok=True)
@@ -76,34 +70,22 @@ jobs:
               img.save(os.path.join(path, "ic_launcher.png"))
               img.save(os.path.join(path, "ic_launcher_round.png"))
               img.save(os.path.join(path, "ic_launcher_foreground.png"))
-
-
-          # Notification icon â€” white on transparent (Android requirement)
-          for folder, size in [("drawable-mdpi",24),("drawable-hdpi",36),("drawable-xhdpi",48),("drawable-xxhdpi",72),("drawable-xxxhdpi",96)]:
+          for folder, size in [("drawable-mdpi",24),("drawable-hdpi",36),("drawable-xhdpi",48),("drawable-xxhdpi",72),("drawable-xxxhdpi",96),("drawable",48)]:
               path = os.path.join(base, folder)
               os.makedirs(path, exist_ok=True)
               img = Image.new("RGBA", (size, size), (0,0,0,0))
               m = size // 6
               ImageDraw.Draw(img).ellipse([m, m, size-m-1, size-m-1], fill=(255,255,255,255))
               img.save(os.path.join(path, "ic_stat_icon.png"))
-
-          # Also create default drawable folder with ic_stat_icon
-          path = os.path.join(base, "drawable")
-          os.makedirs(path, exist_ok=True)
-          img = Image.new("RGBA", (48, 48), (0,0,0,0))
-          ImageDraw.Draw(img).ellipse([6, 6, 41, 41], fill=(255,255,255,255))
-          img.save(os.path.join(path, "ic_stat_icon.png"))
-          print("All icons generated successfully")
+          print("Icons generated")
           PYEOF
 
-      - name: Inject Foreground Service and BootReceiver
+      - name: Write LocationForegroundService.kt
         run: |
-          PKG_DIR="android/app/src/main/java/com/tuktrack/app"
-          mkdir -p "$PKG_DIR"
-
-          # ── LocationForegroundService.kt ─────────────────────────────────────
-          cat > "$PKG_DIR/LocationForegroundService.kt" << 'KOTLIN'
-package com.tuktrack.app
+          PKG="android/app/src/main/java/com/tuktrack/app"
+          mkdir -p "$PKG"
+          python3 -c "
+          code = '''package com.tuktrack.app
 
 import android.app.*
 import android.content.Context
@@ -120,11 +102,11 @@ import androidx.core.app.NotificationCompat
 
 class LocationForegroundService : Service() {
     companion object {
-        const val TAG = "TukTrackFGService"
-        const val CHANNEL_ID = "tuktrack_foreground_location"
+        const val TAG = \"TukTrackFGService\"
+        const val CHANNEL_ID = \"tuktrack_foreground_location\"
         const val NOTIF_ID = 1001
-        const val ACTION_START = "com.tuktrack.app.START_LOCATION"
-        const val ACTION_STOP = "com.tuktrack.app.STOP_LOCATION"
+        const val ACTION_START = \"com.tuktrack.app.START_LOCATION\"
+        const val ACTION_STOP = \"com.tuktrack.app.STOP_LOCATION\"
         fun start(context: Context) {
             val i = Intent(context, LocationForegroundService::class.java).apply { action = ACTION_START }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(i)
@@ -155,8 +137,8 @@ class LocationForegroundService : Service() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("TukTrack - Em Servico")
-            .setContentText("A partilhar localizacao em tempo real. Toque para abrir.")
+            .setContentTitle(\"TukTrack - Em Servico\")
+            .setContentText(\"A partilhar localizacao em tempo real. Toque para abrir.\")
             .setSmallIcon(R.drawable.ic_stat_icon)
             .setOngoing(true).setAutoCancel(false)
             .setPriority(NotificationCompat.PRIORITY_MAX)
@@ -167,8 +149,8 @@ class LocationForegroundService : Service() {
     }
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "TukTrack Location", NotificationManager.IMPORTANCE_LOW)
-            ch.description = "Location running while driver is online"
+            val ch = NotificationChannel(CHANNEL_ID, \"TukTrack Location\", NotificationManager.IMPORTANCE_LOW)
+            ch.description = \"Location running while driver is online\"
             ch.setShowBadge(true)
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
@@ -178,9 +160,9 @@ class LocationForegroundService : Service() {
             locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
             locationListener = object : LocationListener {
                 override fun onLocationChanged(loc: Location) {
-                    sendBroadcast(Intent("com.tuktrack.app.LOCATION_UPDATE").apply {
-                        putExtra("lat", loc.latitude); putExtra("lng", loc.longitude)
-                        putExtra("accuracy", loc.accuracy)
+                    sendBroadcast(Intent(\"com.tuktrack.app.LOCATION_UPDATE\").apply {
+                        putExtra(\"lat\", loc.latitude); putExtra(\"lng\", loc.longitude)
+                        putExtra(\"accuracy\", loc.accuracy)
                     })
                 }
                 override fun onStatusChanged(p: String?, s: Int, e: Bundle?) {}
@@ -189,7 +171,7 @@ class LocationForegroundService : Service() {
             }
             locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 5000L, 10f, locationListener!!)
             locationManager?.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5000L, 10f, locationListener!!)
-        } catch (e: SecurityException) { Log.e(TAG, "No location permission: ${e.message}") }
+        } catch (e: SecurityException) { Log.e(TAG, \"No location permission: \${e.message}\") }
     }
     private fun stopLocationUpdates() {
         locationListener?.let { locationManager?.removeUpdates(it) }
@@ -204,12 +186,16 @@ class LocationForegroundService : Service() {
         (getSystemService(ALARM_SERVICE) as AlarmManager).set(AlarmManager.ELAPSED_REALTIME, 1000L, pi)
         super.onTaskRemoved(rootIntent)
     }
-}
-KOTLIN
+}'''
+          with open('android/app/src/main/java/com/tuktrack/app/LocationForegroundService.kt', 'w') as f:
+              f.write(code)
+          print('LocationForegroundService.kt written')
+          "
 
-          # ── BootReceiver.kt ──────────────────────────────────────────────────
-          cat > "$PKG_DIR/BootReceiver.kt" << 'KOTLIN'
-package com.tuktrack.app
+      - name: Write BootReceiver.kt
+        run: |
+          python3 -c "
+          code = '''package com.tuktrack.app
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -218,49 +204,32 @@ import android.content.Intent
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-            val prefs = context.getSharedPreferences("tuktrack_prefs", Context.MODE_PRIVATE)
-            if (prefs.getBoolean("driver_online", false)) {
+            val prefs = context.getSharedPreferences(\"tuktrack_prefs\", Context.MODE_PRIVATE)
+            if (prefs.getBoolean(\"driver_online\", false)) {
                 LocationForegroundService.start(context)
             }
         }
     }
-}
-KOTLIN
+}'''
+          with open('android/app/src/main/java/com/tuktrack/app/BootReceiver.kt', 'w') as f:
+              f.write(code)
+          print('BootReceiver.kt written')
+          "
 
-          echo "Kotlin files injected"
-
-          # ── Patch AndroidManifest.xml to add service + permissions ───────────
+      - name: Patch AndroidManifest.xml
+        run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            # Add permissions before <application tag
-            sed -i 's|<uses-permission android:name="android.permission.INTERNET" />|<uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />|' "$MANIFEST"
-
-            # Add service and receiver before </application>
-            sed -i 's|</application>|        <service android:name=".LocationForegroundService" android:foregroundServiceType="location" android:exported="false" android:stopWithTask="false" />
-        <receiver android:name=".BootReceiver" android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
-    </application>|' "$MANIFEST"
-            echo "AndroidManifest.xml patched"
+            sed -i 's|<uses-permission android:name="android.permission.INTERNET" />|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />|' "$MANIFEST"
+            sed -i 's|</application>|        <service android:name=".LocationForegroundService" android:foregroundServiceType="location" android:exported="false" android:stopWithTask="false" />\n        <receiver android:name=".BootReceiver" android:exported="true">\n            <intent-filter>\n                <action android:name="android.intent.action.BOOT_COMPLETED" />\n            </intent-filter>\n        </receiver>\n    </application>|' "$MANIFEST"
+            echo "Manifest patched"
           fi
 
-      - name: Patch all Kotlin files to use ic_stat_icon
+      - name: Patch drawable references in Kotlin files
         run: |
-          # Replace any R.drawable.* reference in our Kotlin files with ic_stat_icon
           for FILE in \
             android/app/src/main/java/com/tuktrack/app/MainActivity.kt \
-            android/app/src/main/java/com/tuktrack/app/LocationForegroundService.kt \
-            android/app/src/main/java/com/tuktrack/app/ForegroundLocationService.kt; do
+            android/app/src/main/java/com/tuktrack/app/LocationForegroundService.kt; do
             if [ -f "$FILE" ]; then
               sed -i 's/android\.R\.drawable\.[a-zA-Z_]*/R.drawable.ic_stat_icon/g' "$FILE"
               sed -i 's/R\.drawable\.[a-zA-Z_]*/R.drawable.ic_stat_icon/g' "$FILE"
