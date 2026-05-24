@@ -186,37 +186,8 @@ export default function DriverDashboard() {
       limit(3)
     );
 
-    // Track which notification IDs we've already pushed to the bar
-    const pushedNotifIds = new Set<string>();
-
     const unsubNotify = onSnapshot(notifyQuery, (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      setNotifications(docs);
-
-      // Push NEW notifications to the Android notification bar
-      const bridge = (window as any).AndroidBridge;
-      if (bridge?.showAlertNotification) {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') {
-            const data = change.doc.data() as any;
-            const docId = change.doc.id;
-            if (!pushedNotifIds.has(docId)) {
-              pushedNotifIds.add(docId);
-              // Use a stable numeric ID derived from the doc ID
-              const numId = Math.abs(docId.split('').reduce(
-                (acc: number, c: string) => acc + c.charCodeAt(0), 3000
-              )) % 9000 + 3000;
-              try {
-                bridge.showAlertNotification(
-                  data.title || 'TukTrack',
-                  data.message || data.body || '',
-                  numId
-                );
-              } catch (e) {}
-            }
-          }
-        });
-      }
+      setNotifications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'notifications');
     });
@@ -497,17 +468,6 @@ export default function DriverDashboard() {
         if (!prevActiveShiftRef.current && !sessionStorage.getItem(shiftSeenKey)) {
           sessionStorage.setItem(shiftSeenKey, 'true');
           setShowShiftStartModal(true);
-          // Push shift start alert to Android notification bar
-          try {
-            const bridge = (window as any).AndroidBridge;
-            if (bridge?.showAlertNotification) {
-              bridge.showAlertNotification(
-                '🚦 Turno Iniciado pelo Gestor!',
-                'O seu gestor iniciou um turno. Entre em serviço quando estiver pronto.',
-                5001
-              );
-            }
-          } catch (e) {}
         }
         prevActiveShiftRef.current = shiftData;
         setActiveShift(shiftData);
@@ -812,7 +772,11 @@ export default function DriverDashboard() {
               setTimeout(() => setShowBackgroundPermissionModal(true), 800);
             }
             // STEP 3: Show persistent status bar notification
-            showOnlineNotification();
+            showOnlineNotification(
+              activeShift?.startedAt ? new Date(activeShift.startedAt) :
+              activeShift?.createdAt ? new Date(activeShift.createdAt) :
+              undefined
+            );
           } catch (err) {
             console.error('Failed to update online status:', err);
           } finally {
@@ -1055,14 +1019,19 @@ export default function DriverDashboard() {
   // showForegroundNotification() is a @JavascriptInterface method injected by
   // the fixed MainActivity. It creates an ongoing (non-dismissable) notification
   // in the Android status bar. Tapping it returns the driver to the dashboard.
-  const showOnlineNotification = async () => {
+  // shiftStartTime: when the manager started the shift — used for live timer in notification
+  const showOnlineNotification = async (shiftStartTime?: Date) => {
     const bridge = (window as any).AndroidBridge;
     if (bridge?.showForegroundNotification) {
       try {
+        const shiftStartMs = shiftStartTime ? shiftStartTime.getTime() : Date.now();
+        // Pass shiftStartMs as 3rd argument so the native service can show elapsed time
         bridge.showForegroundNotification(
-          '🟢 TukTrack — Online',
-          'A partilhar localização em tempo real. Toque para abrir.'
+          '🟢 TukTrack — Em Serviço',
+          'A partilhar localização em tempo real. Toque para abrir.',
+          shiftStartMs
         );
+        console.log('[Notif] Foreground service started with shift timer:', new Date(shiftStartMs));
         return;
       } catch (e) {
         console.warn('[Bridge] showForegroundNotification failed:', e);
@@ -1073,7 +1042,7 @@ export default function DriverDashboard() {
       let perm = Notification.permission;
       if (perm === 'default') perm = await Notification.requestPermission();
       if (perm === 'granted') {
-        new Notification('🟢 TukTrack — Online', {
+        new Notification('🟢 TukTrack — Em Serviço', {
           body: 'A partilhar localização em tempo real. Toque para abrir.',
           icon: '/pwa-192x192.png',
           tag: 'tuktrack-online',
