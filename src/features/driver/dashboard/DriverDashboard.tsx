@@ -762,18 +762,15 @@ export default function DriverDashboard() {
             startLocationTracking();
             setIsOnline(true);
             setLocationStatus('active');
+            // Show persistent Android notification bar notification
+            showOnlineNotification();
 
             // STEP 2: Request permissions sequentially AFTER tracking starts
-            // This way location always works even if driver skips permissions
-            if ((window as any).median) {
-              // Request "Appear on top" (overlay) permission
-              if (!overlayPermissionGranted.current) {
-                setTimeout(() => setShowOverlayPermissionModal(true), 800);
-              }
-              // Request background location permission (after overlay modal)
-              else if (!backgroundLocationGranted.current) {
-                setTimeout(() => setShowBackgroundPermissionModal(true), 800);
-              }
+            // Show for ALL users — works in Median APK and PWA
+            if (!overlayPermissionGranted.current) {
+              setTimeout(() => setShowOverlayPermissionModal(true), 800);
+            } else if (!backgroundLocationGranted.current) {
+              setTimeout(() => setShowBackgroundPermissionModal(true), 800);
             }
           } catch (err) {
             console.error('Failed to update online status:', err);
@@ -1705,19 +1702,19 @@ export default function DriverDashboard() {
                     setShowOverlayPermissionModal(false);
                     overlayPermissionGranted.current = true;
                     localStorage.setItem('tuktrack_overlay_granted', 'true');
-                    // Request SYSTEM_ALERT_WINDOW permission
+                    // Try Median permissions API
                     if ((window as any).median?.permissions) {
                       try {
                         await (window as any).median.permissions.request({
                           permission: 'android.permission.SYSTEM_ALERT_WINDOW'
                         });
-                      } catch (e) {
-                        console.warn('Overlay permission request failed:', e);
-                      }
+                      } catch (e) {}
                     }
-                    // tracking already running — now show background location modal
+                    // Show manual instructions
+                    alert('Para ativar: Definicoes > Aplicacoes > TukTrack > Permissoes > Aparecer no topo > Ativar');
+                    // Show background location modal after
                     if (!backgroundLocationGranted.current) {
-                      setTimeout(() => setShowBackgroundPermissionModal(true), 800);
+                      setTimeout(() => setShowBackgroundPermissionModal(true), 1500);
                     }
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm"
@@ -1769,22 +1766,24 @@ export default function DriverDashboard() {
               </p>
               <div className="flex flex-col space-y-3">
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     setShowBackgroundPermissionModal(false);
                     backgroundLocationGranted.current = true;
                     localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                    // Open Android app settings directly — works without any paid plugin
-                    // Driver manually sets Location → "Allow all the time" there
-                    if ((window as any).median?.share?.openBrowser) {
-                      (window as any).median.share.openBrowser({ url: 'package:' + 'co.median.android.bnead' });
-                    } else {
-                      // Fallback: show alert with manual instructions
-                      alert('Para ativar localizacao em segundo plano: Definicoes > Aplicacoes > TukTrack > Permissoes > Localizacao > Permitir sempre');
+                    // Try Median permissions API
+                    if ((window as any).median?.permissions) {
+                      try {
+                        await (window as any).median.permissions.request({
+                          permission: 'android.permission.ACCESS_BACKGROUND_LOCATION'
+                        });
+                      } catch(e) {}
                     }
+                    // Always show manual instructions as well
+                    alert('Para ativar: Definicoes > Aplicacoes > TukTrack > Permissoes > Localizacao > Permitir sempre');
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
                 >
-                  Permitir Localização em Segundo Plano
+                  Permitir Localizacao em Segundo Plano
                 </button>
                 <button
                   onClick={() => {
