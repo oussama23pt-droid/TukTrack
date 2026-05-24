@@ -77,8 +77,6 @@ export default function DriverDashboard() {
   const [localActiveTripId, setLocalActiveTripId] = useState<string | null>(userData?.activeTripId || null);
   const [todayStats, setTodayStats] = useState({ count: 0, earnings: 0 });
   const [cancelTimer, setCancelTimer] = useState<number | null>(null);
-  const [showCancelReasonModal, setShowCancelReasonModal] = useState(false);
-  const [cancelReason, setCancelReason] = useState('');
   const [activeTrip, setActiveTrip] = useState<any | null>(null);
   const [assignedVehicle, setAssignedVehicle] = useState<any | null>(null);
   const [showMap, setShowMap] = useState(false);
@@ -546,14 +544,14 @@ export default function DriverDashboard() {
         const diff = (now - createdTime) / 1000;
         
         if (diff < 20 && data.status === 'active') {
-          setCancelTimer(Math.ceil(60 - diff));
+          setCancelTimer(Math.ceil(20 - diff));
           const interval = setInterval(() => {
             const currentDiff = (Date.now() - createdTime) / 1000;
             if (currentDiff >= 20) {
               setCancelTimer(null);
               clearInterval(interval);
             } else {
-              setCancelTimer(Math.ceil(60 - currentDiff));
+              setCancelTimer(Math.ceil(20 - currentDiff));
             }
           }, 1000);
           return () => clearInterval(interval);
@@ -570,24 +568,15 @@ export default function DriverDashboard() {
 
   const handleTripStarted = (tripId: string) => {
     setLocalActiveTripId(tripId);
-    setCancelTimer(60);
+    setCancelTimer(20);
   };
 
-  const handleCancelTrip = () => {
-    // Show reason modal before cancelling
-    setCancelReason('');
-    setShowCancelReasonModal(true);
-  };
-
-  const confirmCancelTrip = async (reason: string) => {
+  const handleCancelTrip = async () => {
     if (!user || !activeTrip) return;
-    setShowCancelReasonModal(false);
     setIsActionLoading(true);
     try {
       await updateDoc(doc(db, 'trips', activeTrip.id), {
-        status: 'cancelled',
-        cancelReason: reason || 'Sem motivo indicado',
-        cancelledAt: new Date().toISOString(),
+        status: 'cancelled'
       });
       await updateDoc(doc(db, 'users', user.uid), {
         activeTripId: '',
@@ -595,7 +584,7 @@ export default function DriverDashboard() {
       });
       setLocalActiveTripId(null);
       setActiveTrip(null);
-      setCancelTimer(null);
+      alert('Viagem Cancelada.');
     } catch (err: any) {
       handleFirestoreError(err, 'update', `trips/${activeTrip.id}`);
     } finally {
@@ -651,92 +640,104 @@ export default function DriverDashboard() {
     return () => unsub();
   }, [user]);
 
-  const startBackgroundLocation = (): boolean => {
-    if (!(window as any).median?.backgroundLocation) return false;
+  // ── Capacitor BackgroundGeolocation ─────────────────────────────────────────
+  // Runs in background even when app is minimised or screen is off
+  // Shows persistent notification in Android notification bar
+  const bgWatcherIdRef = React.useRef<string | null>(null);
+
+  const startLocationTracking = async () => {
+    _store.uid = user?.uid || null;
+    _store.isOnline = true;
+
+    // Try Capacitor background geolocation first (true background tracking)
     try {
-      (window as any).median.backgroundLocation.start({
-        callback: 'medianLocationUpdated',
-        androidPriority: 'highAccuracy',
-        androidInterval: 5000,
-        androidFastestInterval: 3000,
-        iosDesiredAccuracy: 'best',
-        iosDistanceFilter: 10,
-        androidNotificationTitle: '🟢 TukTrack — Online',
-        androidNotificationText: 'A partilhar localização em tempo real. Toque para abrir a aplicação.',
-        androidNotificationIcon: 'ic_notification',
-      });
-      console.log('[Median] backgroundLocation started successfully');
-      return true;
-    } catch (e) {
-      console.warn('[Median] backgroundLocation.start failed, falling back to watchPosition:', e);
-      return false;
-    }
-  };
+      // Use Capacitor BackgroundGeolocation via window object (injected by Capacitor runtime)
+      // This avoids Vite build errors while still working in the native APK
+      const BGGeo = (window as any)?.Capacitor?.Plugins?.BackgroundGeolocation;
+      if (!BGGeo) throw new Error('BGGeo plugin not available');
 
-  const stopBackgroundLocation = () => {
-    if ((window as any).median?.backgroundLocation) {
-      try {
-        (window as any).median.backgroundLocation.stop();
-      } catch (e) {
-        console.warn('[Median] backgroundLocation.stop failed:', e);
+      if (bgWatcherIdRef.current) {
+        await BGGeo.removeWatcher({ id: bgWatcherIdRef.current });
+        bgWatcherIdRef.current = null;
       }
-    }
-  };
 
-  const startLocationTracking = () => {
-    // Try Median background location plugin first (works in background too)
-    // If the plugin exists but is unlicensed/fails, fall through to watchPosition
-    if ((window as any).median?.backgroundLocation) {
-      const started = startBackgroundLocation();
-      if (started) return; // plugin is working — no need for watchPosition
-      // Plugin failed — fall through to watchPosition below
+      const watcherId = await BGGeo.addWatcher(
+        {
+          backgroundMessage: 'A partilhar localizacao em tempo real.',
+          backgroundTitle: 'TukTrack — Em Servico',
+          requestPermissions: true,
+          stale: false,
+          distanceFilter: 10,
+        },
+        async (location: any, error: any) => {
+          if (error) {
+            console.error('[BGGeo]', error.code, error.message);
+            if (error.code === 'NOT_AUTHORIZED') {
+              const open = window.confirm('TukTrack precisa de localizacao. Abrir Definicoes?');
+              if (open) BGGeo.openSettings();
+            }
+            return;
+          }
+          if (!location || !_store.isOnline || !_store.uid) return;
+          const lat = location.latitude;
+          const lng = location.longitude;
+          _store.onCoordsUpdate?.({ lat, lng });
+          setCurrentCoords({ lat, lng });
+          setLocationStatus('active');
+          const now = Date.now();
+          if (now - _store.lastFirestoreWrite < 5000) return;
+          _store.lastFirestoreWrite = now;
+          try {
+            await updateDoc(doc(db, 'users', _store.uid), {
+              location: { lat, lng, updatedAt: new Date().toISOString() },
+              currentLat: lat,
+              currentLng: lng,
+              locationAccuracy: location.accuracy ?? null,
+              lastUpdated: serverTimestamp(),
+            });
+          } catch (err) {
+            console.error('[BGGeo] Firestore error:', err);
+          }
+        }
+      );
+      bgWatcherIdRef.current = watcherId;
+      console.log('[BGGeo] Started:', watcherId);
+      return;
+    } catch (e) {
+      console.warn('[BGGeo] Not available, using watchPosition:', e);
     }
 
-    // watchPosition fallback: works on web AND in APK when plugin is unavailable
-    // This keeps location updating as long as the screen is on
+    // Fallback: watchPosition (web browser / when Capacitor unavailable)
     if (locationWatchRef.current !== null) {
       navigator.geolocation.clearWatch(locationWatchRef.current);
       locationWatchRef.current = null;
     }
 
-    console.log('[GPS] Starting watchPosition fallback');
-
     const watchId = navigator.geolocation.watchPosition(
       async (pos) => {
-        if (!user) return;
-
+        if (!user || !_store.isOnline) return;
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-
-        // Always update map immediately
         setCurrentCoords({ lat, lng });
         setLocationStatus('active');
-
-        // Throttle Firestore writes to every 5 seconds
         const now = Date.now();
         if (now - lastUpdateRef.current < 5000) return;
         lastUpdateRef.current = now;
-
         try {
           await updateDoc(doc(db, 'users', user.uid), {
-            location: {
-              lat,
-              lng,
-              updatedAt: new Date().toISOString()
-            },
+            location: { lat, lng, updatedAt: new Date().toISOString() },
             currentLat: lat,
             currentLng: lng,
             locationAccuracy: pos.coords.accuracy,
-            lastUpdated: serverTimestamp()
+            lastUpdated: serverTimestamp(),
           });
         } catch (err) {
-          console.error('[GPS] watchPosition Firestore write error:', err);
+          console.error('[GPS] Firestore error:', err);
         }
       },
       (err) => {
         console.error('[GPS] watchPosition error:', err);
         setLocationStatus('disabled');
-        // Retry after 5s only if still online — prevents restart loop
         if (locationWatchRef.current !== null) {
           setTimeout(() => {
             if (isOnlineRef.current) startLocationTracking();
@@ -750,7 +751,17 @@ export default function DriverDashboard() {
     setLocationWatchId(watchId);
   };
 
-  const stopLocationTracking = () => {
+  const stopLocationTracking = async () => {
+    _store.isOnline = false;
+    // Stop Capacitor background geolocation
+    if (bgWatcherIdRef.current) {
+      try {
+        const BGGeo = (window as any)?.Capacitor?.Plugins?.BackgroundGeolocation;
+        if (BGGeo) await BGGeo.removeWatcher({ id: bgWatcherIdRef.current });
+        bgWatcherIdRef.current = null;
+      } catch (e) {}
+    }
+    // Stop watchPosition fallback
     if (locationWatchRef.current !== null) {
       navigator.geolocation.clearWatch(locationWatchRef.current);
       locationWatchRef.current = null;
@@ -810,6 +821,7 @@ export default function DriverDashboard() {
               setTimeout(() => setShowBackgroundPermissionModal(true), 800);
             }
             // STEP 3: Show persistent status bar notification
+            setAppBadge(1);
             showOnlineNotification(
               activeShift?.startedAt ? new Date(activeShift.startedAt) :
               activeShift?.createdAt ? new Date(activeShift.createdAt) :
@@ -879,7 +891,7 @@ export default function DriverDashboard() {
       _store.latestCoords = null;
       lastUpdateRef.current = 0; // reset throttle — next go-online writes position immediately
       stopLocationTracking();
-      stopBackgroundLocation();
+      stopLocationTracking();
       await updateDoc(doc(db, 'users', user.uid), {
         isOnline: false,
         status: 'offline',
@@ -890,6 +902,7 @@ export default function DriverDashboard() {
       });
       setIsOnline(false);
       hideOnlineNotification();
+    setAppBadge(0);
     } catch (err: any) {
       handleFirestoreError(err, 'update', `users/${user.uid}`);
     } finally {
@@ -904,11 +917,11 @@ export default function DriverDashboard() {
     setTimeout(() => startLocationTracking(), 500);
   } else {
     stopLocationTracking();
-    stopBackgroundLocation();
+    stopLocationTracking();
   }
   return () => {
     stopLocationTracking();
-    stopBackgroundLocation();
+    stopLocationTracking();
   };
 }, [isOnline, user?.uid]);
 
@@ -1057,6 +1070,20 @@ export default function DriverDashboard() {
   // showForegroundNotification() is a @JavascriptInterface method injected by
   // the fixed MainActivity. It creates an ongoing (non-dismissable) notification
   // in the Android status bar. Tapping it returns the driver to the dashboard.
+  // Set badge on app icon when driver is online (shows red dot on home screen icon)
+  const setAppBadge = async (count: number) => {
+    try {
+      // Web Badge API (works in PWA/Capacitor)
+      if ('setAppBadge' in navigator) {
+        if (count > 0) {
+          await (navigator as any).setAppBadge(count);
+        } else {
+          await (navigator as any).clearAppBadge();
+        }
+      }
+    } catch (e) {}
+  };
+
   const showOnlineNotification = async (shiftStartTime?: Date) => {
     const bridge = (window as any).AndroidBridge;
     if (bridge?.showForegroundNotification) {
@@ -1807,42 +1834,6 @@ export default function DriverDashboard() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Cancel Trip Reason Modal */}
-      {showCancelReasonModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl">
-            <div className="text-center mb-4">
-              <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-3">
-                <span className="text-2xl">❌</span>
-              </div>
-              <h3 className="text-xl font-black text-navy">Cancelar Viagem</h3>
-              <p className="text-sm text-slate-400 mt-1">Indique o motivo do cancelamento</p>
-            </div>
-            <textarea
-              className="w-full border border-slate-200 rounded-2xl p-3 text-sm text-navy resize-none focus:outline-none focus:ring-2 focus:ring-red-300"
-              rows={3}
-              placeholder="Motivo do cancelamento..."
-              value={cancelReason}
-              onChange={e => setCancelReason(e.target.value)}
-            />
-            <div className="flex gap-3 mt-4">
-              <button
-                onClick={() => setShowCancelReasonModal(false)}
-                className="flex-1 h-12 rounded-2xl border border-slate-200 text-slate-500 font-bold text-sm"
-              >
-                Voltar
-              </button>
-              <button
-                onClick={() => confirmCancelTrip(cancelReason)}
-                className="flex-1 h-12 rounded-2xl bg-red-500 text-white font-black text-sm"
-              >
-                Confirmar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Background Location Permission Modal */}
       <AnimatePresence>
