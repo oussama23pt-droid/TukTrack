@@ -1,35 +1,38 @@
-/**
- * OverlayPermissionModal.tsx
- *
- * Replaces the inline overlay-permission block that was embedded in
- * DriverDashboard. Uses useAndroidPermissions so the bridge is always
- * ready before the button fires.
- */
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useAndroidPermissions } from '../hooks/useAndroidPermissions';
+import { useAndroidPermissions, isAndroidApp } from '../hooks/useAndroidPermissions';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  /** Called when the driver grants or skips the permission */
   onDone: () => void;
 }
 
 export function OverlayPermissionModal({ isOpen, onClose, onDone }: Props) {
   const { requestOverlay } = useAndroidPermissions();
+  const isAndroid = isAndroidApp();
 
   const handleOpenSettings = () => {
-    onClose(); // close modal first so it doesn't overlay the Settings screen
-    requestOverlay(onDone);
-    // If user skips / returns without granting we still call onDone after a delay
-    setTimeout(onDone, 1500);
+    onClose();
+    if (isAndroid) {
+      requestOverlay(onDone);
+      setTimeout(onDone, 1500);
+    } else {
+      // Web — permission not needed, just proceed
+      onDone();
+    }
   };
 
   const handleSkip = () => {
     onClose();
     onDone();
   };
+
+  // On web this permission doesn't apply — skip the modal entirely
+  if (!isAndroid) {
+    if (isOpen) { onClose(); onDone(); }
+    return null;
+  }
 
   return (
     <AnimatePresence>
@@ -74,9 +77,9 @@ export function OverlayPermissionModal({ isOpen, onClose, onDone }: Props) {
               </p>
               <ol className="space-y-2">
                 {[
-                  <>Encontre <strong className="text-white">TukTrack</strong> na lista — toque nele</>,
-                  <>Ative <strong className="text-amber">"Autorizar superposição"</strong></>,
-                  <>Volte ao TukTrack e prima <strong className="text-white">GO!</strong></>,
+                  <span key="1">Encontre <strong className="text-white">TukTrack</strong> na lista — toque nele</span>,
+                  <span key="2">Ative <strong className="text-amber">"Autorizar superposição"</strong></span>,
+                  <span key="3">Volte ao TukTrack e prima <strong className="text-white">GO!</strong></span>,
                 ].map((step, i) => (
                   <li key={i} className="flex items-start space-x-2">
                     <span className="text-amber font-black text-sm">{i + 1}.</span>
