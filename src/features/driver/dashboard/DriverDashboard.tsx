@@ -321,14 +321,42 @@ export default function DriverDashboard() {
     };
 
     const handleVisibilityChange = async () => {
-      if (wakeLockRef.current !== null && document.visibilityState === 'visible' && isOnline) {
+      if (document.visibilityState === 'visible' && isOnline) {
+        // Re-acquire wake lock when app comes back to foreground
         await requestWakeLock();
+        // Restart location tracking if it stopped (Capacitor BGGeo handles background,
+        // but watchPosition needs restart on foreground return)
+        if (_store.isOnline && !bgWatcherIdRef.current && locationWatchRef.current === null) {
+          console.log('[App] Returned to foreground — restarting location tracking');
+          startLocationTracking();
+        }
+      }
+    };
+
+    // Also listen via Capacitor App plugin (more reliable than visibilitychange in APK)
+    let capAppListener: any = null;
+    const setupCapacitorAppListener = async () => {
+      try {
+        const { App } = await import('@capacitor/app');
+        capAppListener = await App.addListener('appStateChange', async ({ isActive }) => {
+          if (isActive && isOnline) {
+            console.log('[App] Came to foreground via Capacitor');
+            await requestWakeLock();
+            // Restart location if needed
+            if (_store.isOnline && !bgWatcherIdRef.current && locationWatchRef.current === null) {
+              startLocationTracking();
+            }
+          }
+        });
+      } catch (e) {
+        // Capacitor App plugin not available — use visibilitychange only
       }
     };
 
     if (isOnline) {
       requestWakeLock();
       document.addEventListener('visibilitychange', handleVisibilityChange);
+      setupCapacitorAppListener();
     } else {
       if (wakeLockRef.current) {
         wakeLockRef.current.release();
@@ -338,6 +366,7 @@ export default function DriverDashboard() {
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (capAppListener) capAppListener.remove();
       if (wakeLockRef.current) {
         wakeLockRef.current.release();
         wakeLockRef.current = null;
@@ -1796,36 +1825,28 @@ export default function DriverDashboard() {
                 <button
                   onClick={async () => {
                     setShowOverlayPermissionModal(false);
-                    const bridge = (window as any).AndroidBridge;
-                    if (bridge?.openOverlaySettings) {
-                      bridge.openOverlaySettings();
-                      let checks = 0;
-                      const poll = setInterval(() => {
-                        checks++;
-                        if (bridge.isOverlayGranted?.()) {
-                          overlayPermissionGranted.current = true;
-                          localStorage.setItem('tuktrack_overlay_granted', 'true');
-                          clearInterval(poll);
-                          if (!backgroundLocationGranted.current) {
-                            setTimeout(() => setShowBackgroundPermissionModal(true), 800);
-                          }
-                        }
-                        if (checks >= 40) {
-                          clearInterval(poll);
-                          overlayPermissionGranted.current = true;
-                          localStorage.setItem('tuktrack_overlay_granted', 'true');
-                          if (!backgroundLocationGranted.current) {
-                            setTimeout(() => setShowBackgroundPermissionModal(true), 800);
-                          }
-                        }
-                      }, 500);
-                    } else {
-                      overlayPermissionGranted.current = true;
-                      localStorage.setItem('tuktrack_overlay_granted', 'true');
-                      if (!backgroundLocationGranted.current) {
-                        setTimeout(() => setShowBackgroundPermissionModal(true), 800);
-                      }
+                    overlayPermissionGranted.current = true;
+                    localStorage.setItem('tuktrack_overlay_granted', 'true');
+
+                    // Open Android "Appear on top" settings page directly
+                    // Works in Capacitor APK — takes driver straight to the permission toggle
+                    try {
+                      const { NativeSettings, AndroidSettings } = await import('capacitor-native-settings');
+                      await NativeSettings.openAndroid({ option: AndroidSettings.AppDrawOverlays });
+                    } catch (e) {
+                      // Fallback: try Capacitor App plugin to open settings
+                      try {
+                        const appId = 'com.tuktrack.app';
+                        window.open(`intent://settings/action/MANAGE_OVERLAY_PERMISSION/package:${appId}#Intent;scheme=android-app;end`, '_blank');
+                      } catch (e2) {}
                     }
+
+                    // Show background location modal after driver returns
+                    setTimeout(() => {
+                      if (!backgroundLocationGranted.current) {
+                        setShowBackgroundPermissionModal(true);
+                      }
+                    }, 2000);
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm"
                 >
@@ -1876,30 +1897,23 @@ export default function DriverDashboard() {
               </p>
               <div className="flex flex-col space-y-3">
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     setShowBackgroundPermissionModal(false);
-                    const bridge = (window as any).AndroidBridge;
+                    backgroundLocationGranted.current = true;
+                    localStorage.setItem('tuktrack_bg_location_granted', 'true');
 
-                    // openBackgroundLocationSettings() goes DIRECTLY to the app's
-                    // Location permission page in Android Settings where the driver
-                    // sees "Allow all the time" with one tap — no intermediate dialogs.
-                    if (bridge?.openBackgroundLocationSettings) {
-                      bridge.openBackgroundLocationSettings();
-                    } else if (bridge?.openLocationSettings) {
-                      bridge.openLocationSettings();
+                    // Open Android app Location permission settings directly
+                    // Driver sees "Allow all the time" option right away
+                    try {
+                      const { NativeSettings, AndroidSettings } = await import('capacitor-native-settings');
+                      await NativeSettings.openAndroid({ option: AndroidSettings.ApplicationDetails });
+                    } catch (e) {
+                      // Fallback: use Capacitor BGGeo openSettings
+                      try {
+                        const BGGeo = (window as any)?.Capacitor?.Plugins?.BackgroundGeolocation;
+                        if (BGGeo?.openSettings) await BGGeo.openSettings();
+                      } catch (e2) {}
                     }
-
-                    // Poll after driver returns from Settings
-                    let checks = 0;
-                    const poll = setInterval(() => {
-                      checks++;
-                      const granted = bridge?.isBackgroundLocationGranted?.() ?? false;
-                      if (granted || checks >= 60) {
-                        clearInterval(poll);
-                        backgroundLocationGranted.current = true;
-                        localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                      }
-                    }, 500);
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
                 >
