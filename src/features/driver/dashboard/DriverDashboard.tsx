@@ -69,7 +69,7 @@ export default function DriverDashboard() {
   const [activeSosId, setActiveSosId] = useState<string | null>(null);
   const [isSOSLoading, setIsSOSLoading] = useState(false);
   const [locationWatchId, setLocationWatchId] = useState<number | null>(null);
-  const [shiftNotification, setShiftNotification] = useState<{title: string, message: string} | null>(null);
+
   const locationWatchRef = React.useRef<number | null>(null);
   const [isTripModalOpen, setIsTripModalOpen] = useState(false);
   const lastUpdateRef = React.useRef<number>(0);
@@ -849,6 +849,7 @@ export default function DriverDashboard() {
         lastUpdated: serverTimestamp()
       });
       setIsOnline(false);
+      hideOnlineNotification();
     } catch (err: any) {
       handleFirestoreError(err, 'update', `users/${user.uid}`);
     } finally {
@@ -1012,52 +1013,41 @@ export default function DriverDashboard() {
     }
   };
 
-  // ─── Listen for manager shift notifications ──────────────────────────────────
-  useEffect(() => {
-    if (!user) return;
-    const notifQuery = query(
-      collection(db, 'notifications'),
-      where('isForDrivers', '==', true),
-      where('read', '==', false),
-      orderBy('createdAt', 'desc'),
-      limit(1)
-    );
-    const unsub = onSnapshot(notifQuery, (snapshot) => {
-      snapshot.docChanges().forEach(async (change) => {
-        if (change.type === 'added') {
-          const notif = change.doc.data();
-          setShiftNotification({ title: notif.title || 'TukTrack', message: notif.message || '' });
-          setTimeout(() => setShiftNotification(null), 8000);
-          try { await updateDoc(doc(db, 'notifications', change.doc.id), { read: true }); } catch (e) {}
-        }
+  // ─── Persistent notification in Android notification bar ─────────────────────
+  // Uses Median's OneSignal bridge to show/hide a sticky notification
+  const showOnlineNotification = () => {
+    // Show persistent notification via Median OneSignal bridge
+    if ((window as any).median?.onesignal) {
+      try {
+        (window as any).median.onesignal.sendTag('driver_status', 'online');
+      } catch(e) {}
+    }
+    // Fallback: use Web Notifications API (works in PWA/browser)
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('TukTrack — Online', {
+        body: 'A partilhar localizacao em tempo real.',
+        icon: '/pwa-192x192.png',
+        tag: 'tuktrack-online', // tag keeps it as ONE notification (replaces itself)
+        requireInteraction: true, // stays until dismissed
+        silent: true,
       });
-    });
-    return () => unsub();
-  }, [user?.uid]);
+    } else if ('Notification' in window && Notification.permission !== 'denied') {
+      Notification.requestPermission().then(perm => {
+        if (perm === 'granted') showOnlineNotification();
+      });
+    }
+  };
+
+  const hideOnlineNotification = () => {
+    if ((window as any).median?.onesignal) {
+      try {
+        (window as any).median.onesignal.deleteTag('driver_status');
+      } catch(e) {}
+    }
+  };
 
   return (
-    <>
-      {/* ── Persistent Online Bar ── */}
-      {isOnline && (
-        <div style={{position:'fixed',top:0,left:0,right:0,zIndex:9999,background:'#16a34a',color:'white',textAlign:'center',padding:'8px',fontSize:'13px',fontWeight:'bold',display:'flex',alignItems:'center',justifyContent:'center',gap:'6px'}}>
-          <span style={{animation:'pulse 1s infinite'}}>●</span>
-          TukTrack — Online · GPS Ativo
-        </div>
-      )}
-      {/* ── Shift Notification Banner ── */}
-      {shiftNotification && (
-        <div
-          onClick={() => setShiftNotification(null)}
-          style={{position:'fixed',top:isOnline?36:0,left:0,right:0,zIndex:9998,background:'#f59e0b',color:'#0f172a',padding:'12px 16px',boxShadow:'0 4px 12px rgba(0,0,0,0.2)',cursor:'pointer',display:'flex',gap:'12px',alignItems:'flex-start'}}
-        >
-          <div style={{flex:1}}>
-            <p style={{fontWeight:900,fontSize:'14px',margin:0}}>{shiftNotification.title}</p>
-            <p style={{fontSize:'12px',margin:'4px 0 0',opacity:0.8}}>{shiftNotification.message}</p>
-          </div>
-          <span style={{fontSize:'18px',fontWeight:'bold',opacity:0.6}}>✕</span>
-        </div>
-      )}
-      <div className="flex flex-col space-y-8 pb-48 lg:pb-8 max-w-lg mx-auto" style={{marginTop: isOnline ? '36px' : '0'}}>
+    <div className="flex flex-col space-y-8 pb-48 lg:pb-8 max-w-lg mx-auto">
       {/* Notifications Section */}
       <AnimatePresence>
         {notifications.map((notif) => (
@@ -1864,6 +1854,5 @@ export default function DriverDashboard() {
         </div>
       )}
     </div>
-    </>
   );
 }
