@@ -6,10 +6,10 @@
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
-<!--  ── Foreground service ──  -->
+<!--  ── Foreground service for persistent location ──  -->
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
-<!--  ── Notifications (Android 13+) ──  -->
+<!--  ── Persistent status-bar notification (Android 13+) ──  -->
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 <!--  ── Keep CPU alive while tracking ──  -->
 <uses-permission android:name="android.permission.WAKE_LOCK"/>
@@ -26,20 +26,23 @@
 <category android:name="android.intent.category.LAUNCHER"/>
 </intent-filter>
 </activity>
-<!--  ── OUR Foreground Service — keeps app alive + shows sticky notification ──  -->
-<service android:name=".ForegroundLocationService" android:foregroundServiceType="location" android:exported="false"/>
-<!--  Background location foreground services (from Capacitor plugin)  -->
-<service android:name="com.transistorsoft.locationmanager.service.TrackingService" android:foregroundServiceType="location" android:exported="false"/>
-<service android:name="com.transistorsoft.locationmanager.service.LocationRequestService" android:foregroundServiceType="location" android:exported="false"/>
-<!--  Boot receiver  -->
-<receiver android:name="com.transistorsoft.locationmanager.util.BootReceiver" android:exported="false">
+<!--  ── OUR background GPS foreground service ──  -->
+<service android:name=".LocationForegroundService" android:foregroundServiceType="location" android:exported="false"/>
+<!--  Boot receiver — restarts service after phone reboot if driver was online  -->
+<receiver android:name=".BootReceiver" android:exported="true">
 <intent-filter>
 <action android:name="android.intent.action.BOOT_COMPLETED"/>
 </intent-filter>
 </receiver>
+<!--  FCM push notifications  -->
+<service android:name=".TukTrackFirebaseService" android:exported="false">
+<intent-filter>
+<action android:name="com.google.firebase.MESSAGING_EVENT"/>
+</intent-filter>
+</service>
 <!--  @capacitor/local-notifications channel config  -->
-<meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_id" android:value="tuktrack_foreground"/>
-<meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_name" android:value="TukTrack Serviço Ativo"/>
+<meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_id" android:value="tuktrack_alerts"/>
+<meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_name" android:value="TukTrack Alertas"/>
 <meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_importance" android:value="4"/>
 <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.fileprovider" android:exported="false" android:grantUriPermissions="true">
 <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths"/>
