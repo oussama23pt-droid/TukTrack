@@ -17,19 +17,31 @@ import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.google.android.gms.location.*
+import org.json.JSONObject
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 /**
- * LocationForegroundService
+ * LocationForegroundService — "Always-on background engine"
+ * ──────────────────────────────────────────────────────────
+ * Architecture for surviving app kill:
  *
- * Architecture role: "Always-on background engine"
- * ─────────────────────────────────────────────────
- * • Runs as an Android Foreground Service → Android will NOT kill it
- * • Holds a PARTIAL_WAKE_LOCK → CPU stays on with screen off
- * • GPS updates every 4 seconds via FusedLocationProviderClient
- * • Broadcasts coords to MainActivity → forwarded to WebView → Firestore
- * • Notification is setOngoing(true) → cannot be swiped away, ever
- * • onTaskRemoved → reschedules self via AlarmManager if swiped from recents
- * • START_STICKY → Android auto-restarts if killed under memory pressure
+ *  1. Android Foreground Service  → OS will NOT kill it
+ *  2. PARTIAL_WAKE_LOCK           → CPU stays on with screen off
+ *  3. GPS via FusedLocationProviderClient every 4 s
+ *  4. When MainActivity is alive  → broadcast to it (it forwards to WebView → Firestore JS SDK)
+ *  5. When MainActivity is dead   → write DIRECTLY to Firestore via REST API  ← KEY FIX
+ *  6. setOngoing(true)            → notification CANNOT be swiped away
+ *  7. onTaskRemoved               → reschedules self via setExactAndAllowWhileIdle
+ *  8. START_STICKY                → Android auto-restarts after memory kill
+ *
+ * The Firestore REST endpoint requires no SDK — just an HTTP POST with the
+ * driver's UID (stored in SharedPreferences by AndroidBridge when going online).
  */
 class LocationForegroundService : Service() {
 
@@ -38,17 +50,22 @@ class LocationForegroundService : Service() {
         const val NOTIFICATION_ID   = 1001
         const val EXTRA_SHIFT_START = "shift_start_epoch_ms"
         const val ACTION_STOP       = "com.tuktrack.STOP_SERVICE"
+
+        // Firestore REST base — project ID from google-services.json
+        private const val FIRESTORE_PROJECT = "tuktrack-19377"
+        private const val FIRESTORE_BASE    =
+            "https://firestore.googleapis.com/v1/projects/$FIRESTORE_PROJECT/databases/(default)/documents"
     }
 
     private lateinit var fusedClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
     private var wakeLock: PowerManager.WakeLock? = null
-    private val handler = Handler(Looper.getMainLooper())
+    private val handler        = Handler(Looper.getMainLooper())
+    private val networkHandler = Handler(Looper.getMainLooper())
     private var shiftStartMs: Long = 0L
-    private var lastKnownLat: Double = 0.0
-    private var lastKnownLng: Double = 0.0
+    private var lastFirestoreWriteMs: Long = 0L
 
-    // JS can send ACTION_STOP broadcast to cleanly stop the service
+    // Broadcast receiver that lets the JS layer (or BootReceiver) stop us cleanly
     private val stopReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == ACTION_STOP) stopSelf()
@@ -63,12 +80,14 @@ class LocationForegroundService : Service() {
         }
     }
 
+    // ── LIFECYCLE ──────────────────────────────────────────────────────────────
+
     override fun onCreate() {
         super.onCreate()
         fusedClient = LocationServices.getFusedLocationProviderClient(this)
         createChannel()
 
-        // PARTIAL_WAKE_LOCK: keeps CPU running with screen off — up to 12 hours
+        // PARTIAL_WAKE_LOCK: keeps CPU running with screen off
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
@@ -88,20 +107,22 @@ class LocationForegroundService : Service() {
         shiftStartMs = intent?.getLongExtra(EXTRA_SHIFT_START, 0L) ?: 0L
         if (shiftStartMs == 0L) shiftStartMs = System.currentTimeMillis()
 
-        // startForeground() is what makes the notification non-dismissable.
-        // This MUST be called within 5 seconds of starting the service.
+        // startForeground() MUST be called within 5 s — this makes notification non-dismissable
         startForeground(NOTIFICATION_ID, buildNotification())
         startLocationUpdates()
 
         handler.removeCallbacks(timerRunnable)
         handler.post(timerRunnable)
 
-        // START_STICKY: if Android kills us under memory pressure, restart with
-        // the last intent so shiftStartMs is preserved.
+        // START_STICKY: Android restarts us after memory kill, preserving the last intent
         return START_STICKY
     }
 
-    // If the driver swipes the app from recents, reschedule ourselves via AlarmManager
+    /**
+     * onTaskRemoved fires when the driver swipes the app from Recents.
+     * We schedule an exact alarm to restart ourselves 1 second later.
+     * Uses setExactAndAllowWhileIdle (Android 6+) so it fires even in Doze.
+     */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         val restart = Intent(applicationContext, LocationForegroundService::class.java).apply {
@@ -113,11 +134,20 @@ class LocationForegroundService : Service() {
             PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
         )
         val alarmMgr = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
-        alarmMgr.set(
-            android.app.AlarmManager.ELAPSED_REALTIME,
-            android.os.SystemClock.elapsedRealtime() + 1000,
-            pi
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // setExactAndAllowWhileIdle fires even during Doze mode — critical for Samsung
+            alarmMgr.setExactAndAllowWhileIdle(
+                android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                android.os.SystemClock.elapsedRealtime() + 1000,
+                pi
+            )
+        } else {
+            alarmMgr.set(
+                android.app.AlarmManager.ELAPSED_REALTIME,
+                android.os.SystemClock.elapsedRealtime() + 1000,
+                pi
+            )
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -130,7 +160,137 @@ class LocationForegroundService : Service() {
         try { unregisterReceiver(stopReceiver) } catch (_: Exception) {}
     }
 
+    // ── GPS UPDATES ────────────────────────────────────────────────────────────
+
+    private fun startLocationUpdates() {
+        val request = LocationRequest.Builder(
+            Priority.PRIORITY_HIGH_ACCURACY, 4000L
+        ).apply {
+            setMinUpdateIntervalMillis(3000L)
+            setWaitForAccurateLocation(false)
+            setMaxUpdateDelayMillis(6000L)
+        }.build()
+
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                val loc: Location = result.lastLocation ?: return
+                onNewLocation(loc)
+            }
+        }
+
+        try {
+            fusedClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+        } catch (e: SecurityException) {
+            stopSelf()
+        }
+    }
+
+    private fun onNewLocation(loc: Location) {
+        val lat = loc.latitude
+        val lng = loc.longitude
+        val acc = loc.accuracy
+
+        // Persist last known position (used by BootReceiver after reboot)
+        getSharedPreferences("tuktrack", Context.MODE_PRIVATE).edit()
+            .putFloat("last_lat",  lat.toFloat())
+            .putFloat("last_lng",  lng.toFloat())
+            .putBoolean("driver_was_online", true)
+            .apply()
+
+        // 1️⃣  Always broadcast to MainActivity — if it's alive, it forwards to WebView/Firestore JS SDK
+        sendBroadcast(Intent("com.tuktrack.LOCATION_UPDATE").apply {
+            putExtra("lat",      lat)
+            putExtra("lng",      lng)
+            putExtra("accuracy", acc)
+            setPackage(packageName)
+        })
+
+        // 2️⃣  DIRECT Firestore REST write — fires whenever we need it and throttles to 5 s.
+        //     This is the KEY FIX: it works even when the app is KILLED and MainActivity is gone.
+        val now = System.currentTimeMillis()
+        if (now - lastFirestoreWriteMs >= 5000) {
+            lastFirestoreWriteMs = now
+            val uid = getSharedPreferences("tuktrack", Context.MODE_PRIVATE)
+                .getString("driver_uid", null)
+            if (!uid.isNullOrBlank()) {
+                writeLocationToFirestoreRest(uid, lat, lng, acc)
+            }
+        }
+    }
+
+    /**
+     * Writes the driver's location directly to Firestore via the REST API.
+     * No Firebase SDK needed — just OkHttp-style HttpURLConnection on a background thread.
+     *
+     * PATCH merges only the location fields — does NOT overwrite other user document fields.
+     * Firestore field mask: currentLat, currentLng, locationAccuracy, lastUpdated, location
+     */
+    private fun writeLocationToFirestoreRest(
+        uid: String, lat: Double, lng: Double, accuracy: Float
+    ) {
+        networkHandler.post {
+            Thread {
+                try {
+                    val isoNow = isoTimestamp()
+
+                    // Build the Firestore PATCH body (only location fields)
+                    val body = JSONObject().apply {
+                        put("fields", JSONObject().apply {
+                            put("currentLat",       JSONObject().put("doubleValue", lat))
+                            put("currentLng",       JSONObject().put("doubleValue", lng))
+                            put("locationAccuracy", JSONObject().put("doubleValue", accuracy.toDouble()))
+                            put("lastUpdated",      JSONObject().put("timestampValue", isoNow))
+                            put("location", JSONObject().put("mapValue", JSONObject().put("fields", JSONObject().apply {
+                                put("lat",       JSONObject().put("doubleValue", lat))
+                                put("lng",       JSONObject().put("doubleValue", lng))
+                                put("updatedAt", JSONObject().put("stringValue",  isoNow))
+                            })))
+                        })
+                    }.toString()
+
+                    // Firestore PATCH with field mask so we don't touch other fields
+                    val fieldMask = "currentLat,currentLng,locationAccuracy,lastUpdated,location"
+                    val url = URL(
+                        "$FIRESTORE_BASE/users/$uid" +
+                        "?updateMask.fieldPaths=currentLat" +
+                        "&updateMask.fieldPaths=currentLng" +
+                        "&updateMask.fieldPaths=locationAccuracy" +
+                        "&updateMask.fieldPaths=lastUpdated" +
+                        "&updateMask.fieldPaths=location"
+                    )
+
+                    val conn = url.openConnection() as HttpURLConnection
+                    conn.apply {
+                        requestMethod      = "PATCH"
+                        connectTimeout     = 10_000
+                        readTimeout        = 10_000
+                        doOutput           = true
+                        setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                    }
+
+                    OutputStreamWriter(conn.outputStream, "UTF-8").use { it.write(body) }
+
+                    val code = conn.responseCode
+                    if (code !in 200..299) {
+                        val err = conn.errorStream?.bufferedReader()?.readText() ?: "unknown"
+                        android.util.Log.w("TukTrack", "Firestore REST $code: $err")
+                    }
+                    conn.disconnect()
+                } catch (e: Exception) {
+                    android.util.Log.e("TukTrack", "Firestore REST write failed", e)
+                }
+            }.start()
+        }
+    }
+
+    private fun isoTimestamp(): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        return sdf.format(Date())
+    }
+
     // ── NOTIFICATION ───────────────────────────────────────────────────────────
+
     private fun buildNotification(): Notification {
         val elapsed   = (System.currentTimeMillis() - shiftStartMs).coerceAtLeast(0)
         val totalSecs = elapsed / 1000
@@ -151,21 +311,19 @@ class LocationForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            // Title shows green dot + app name + elapsed time
             .setContentTitle("🟢 TukTrack — Em Serviço  •  $timer")
             .setContentText("A partilhar localização em tempo real. Toque para abrir.")
             .setSmallIcon(R.drawable.ic_stat_icon)
-            .setColor(0xFF10B981.toInt())           // green accent
+            .setColor(0xFF10B981.toInt())
             .setContentIntent(tapIntent)
-            // ── These two lines make it non-dismissable ──
-            .setOngoing(true)                        // cannot be swiped
-            .setSilent(true)                         // no sound/vibration
-            // ─────────────────────────────────────────────
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            // ── Non-dismissable: these two are mandatory ──
+            .setOngoing(true)          // cannot be swiped away
+            .setSilent(true)           // no sound / vibration
+            // ──────────────────────────────────────────────
+            .setPriority(NotificationCompat.PRIORITY_LOW)   // LOW = sticky, no heads-up noise
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            // Live elapsed clock shown in the notification header
             .setUsesChronometer(true)
             .setChronometerCountDown(false)
             .setWhen(shiftStartMs)
@@ -181,63 +339,23 @@ class LocationForegroundService : Service() {
     }
 
     // ── NOTIFICATION CHANNEL ───────────────────────────────────────────────────
+
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(
                 CHANNEL_ID,
                 "TukTrack Online Status",
-                // IMPORTANCE_DEFAULT: visible at top, no sound
-                NotificationManager.IMPORTANCE_DEFAULT
+                // IMPORTANCE_LOW: shows in status bar, cannot be dismissed, no sound — ideal for
+                // a foreground service. IMPORTANCE_DEFAULT can be swiped on Samsung One UI.
+                NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Mostra enquanto o motorista partilha localização"
+                description          = "Mostra enquanto o motorista partilha localização"
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 setSound(null, null)
                 enableVibration(false)
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
-        }
-    }
-
-    // ── GPS UPDATES ────────────────────────────────────────────────────────────
-    private fun startLocationUpdates() {
-        val request = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY, 4000L
-        ).apply {
-            setMinUpdateIntervalMillis(3000L)
-            setWaitForAccurateLocation(false)
-            setMaxUpdateDelayMillis(6000L)
-        }.build()
-
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                val loc: Location = result.lastLocation ?: return
-                lastKnownLat = loc.latitude
-                lastKnownLng = loc.longitude
-
-                // Persist so BootReceiver can report last known position after reboot
-                getSharedPreferences("tuktrack", Context.MODE_PRIVATE).edit()
-                    .putFloat("last_lat", loc.latitude.toFloat())
-                    .putFloat("last_lng", loc.longitude.toFloat())
-                    .putBoolean("driver_was_online", true)
-                    .apply()
-
-                // Send to MainActivity → WebView → Firestore via 'nativeLocationUpdate' event
-                sendBroadcast(Intent("com.tuktrack.LOCATION_UPDATE").apply {
-                    putExtra("lat",      loc.latitude)
-                    putExtra("lng",      loc.longitude)
-                    putExtra("accuracy", loc.accuracy)
-                    setPackage(packageName)
-                })
-            }
-        }
-
-        try {
-            fusedClient.requestLocationUpdates(
-                request, locationCallback, Looper.getMainLooper()
-            )
-        } catch (e: SecurityException) {
-            stopSelf()
         }
     }
 }
