@@ -33,6 +33,16 @@ class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         createNotificationChannels()
+
+        // Request POST_NOTIFICATIONS immediately on Android 13+ so LocalNotifications
+        // and our AndroidBridge notifications both work without extra prompts
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATION)
+            }
+        }
     }
 
     override fun onStart() {
@@ -40,25 +50,36 @@ class MainActivity : BridgeActivity() {
         injectBridge()
     }
 
+    // After any permission dialog closes, fire a JS event so the UI can re-check state
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        try {
+            bridge.webView.evaluateJavascript(
+                "window.dispatchEvent(new Event('permissionResult'));", null)
+        } catch (_: Exception) {}
+    }
+
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(NotificationManager::class.java)
 
-            // Channel 1: persistent "driver is online" notification (no sound)
+            // Channel 1: persistent "driver is online" — no sound, non-dismissable
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_ONLINE, "TukTrack Online Status",
                     NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "Shows while the driver is sharing location"
+                    description = "Mostra enquanto o motorista partilha localização"
                     setShowBadge(false)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 }
             )
 
-            // Channel 2: alert notifications (SOS, shift start, GPS warnings)
+            // Channel 2: alert notifications (SOS, shift, GPS, messages)
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_ALERTS, "TukTrack Alertas",
                     NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "SOS, turno, GPS e alertas operacionais"
+                    description = "SOS, turno, GPS e mensagens"
                     setShowBadge(true)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                     enableVibration(true)
@@ -95,13 +116,6 @@ class MainActivity : BridgeActivity() {
         return true
     }
 
-    private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ActivityCompat.requestPermissions(this,
-                arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATION)
-        }
-    }
-
     private fun buildTapIntent(): PendingIntent {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -112,16 +126,17 @@ class MainActivity : BridgeActivity() {
 
     inner class AndroidBridge {
 
-        // ── ONLINE status bar notification (persistent, no swipe) ─────────────
-        // shiftStartMs = shift start time in epoch milliseconds from JS
-        // e.g. bridge.showForegroundNotification("title", "msg", shiftStartTime.getTime())
+        // ── 1. FOREGROUND SERVICE NOTIFICATION (non-dismissable) ─────────────────
+        // Uses LocationForegroundService which calls startForeground() —
+        // the ONLY type of notification Android prevents users from dismissing.
+        // The notification shows a live timer ticking from shiftStartMs.
         @JavascriptInterface
         fun showForegroundNotification(title: String, message: String, shiftStartMs: Long = 0L) {
-            if (!hasNotificationPermission()) { requestNotificationPermission(); return }
-
-            // Start LocationForegroundService — it calls startForeground() internally.
-            // This is the ONLY notification Android cannot dismiss.
-            // We do NOT post a separate notification here — the service owns it.
+            if (!hasNotificationPermission()) {
+                ActivityCompat.requestPermissions(this@MainActivity,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATION)
+                return
+            }
             val svcIntent = Intent(this@MainActivity, LocationForegroundService::class.java).apply {
                 putExtra(LocationForegroundService.EXTRA_SHIFT_START,
                     if (shiftStartMs > 0) shiftStartMs else System.currentTimeMillis())
@@ -135,22 +150,20 @@ class MainActivity : BridgeActivity() {
 
         @JavascriptInterface
         fun hideForegroundNotification() {
-            // Stopping the service removes the startForeground notification automatically
+            // Stopping the service removes its startForeground notification automatically
             stopService(Intent(this@MainActivity, LocationForegroundService::class.java))
         }
 
-        // ── ALERT notifications (SOS, shift, GPS, manager messages) ──────────
-        // Call this from JS for any event that needs to appear in the notification bar
-        // even when the app is in the background.
-        // notifId: unique int per notification type (e.g. 2=SOS, 3=shift, 4=GPS)
+        // ── 2. ALERT NOTIFICATIONS (messages, SOS, GPS events) ──────────────────
+        // These CAN be dismissed — used for messages and alerts
         @JavascriptInterface
         fun showAlertNotification(title: String, message: String, notifId: Int) {
-            if (!hasNotificationPermission()) { requestNotificationPermission(); return }
+            if (!hasNotificationPermission()) return
 
             val notification = NotificationCompat.Builder(this@MainActivity, CHANNEL_ALERTS)
                 .setContentTitle(title)
                 .setContentText(message)
-                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setSmallIcon(android.R.drawable.ic_dialog_email)
                 .setContentIntent(buildTapIntent())
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -159,8 +172,7 @@ class MainActivity : BridgeActivity() {
                 .build()
 
             try {
-                NotificationManagerCompat.from(this@MainActivity)
-                    .notify(notifId, notification)
+                NotificationManagerCompat.from(this@MainActivity).notify(notifId, notification)
             } catch (e: SecurityException) {}
         }
 
@@ -169,7 +181,8 @@ class MainActivity : BridgeActivity() {
             NotificationManagerCompat.from(this@MainActivity).cancel(notifId)
         }
 
-        // ── Overlay / location permissions (unchanged) ────────────────────────
+        // ── 3. GPS / OVERLAY / LOCATION PERMISSIONS ──────────────────────────────
+
         @JavascriptInterface
         fun openOverlaySettings() {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -218,6 +231,21 @@ class MainActivity : BridgeActivity() {
         fun openAppSettings() {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                 Uri.parse("package:${packageName}")))
+        }
+
+        // ── 4. OPEN NOTIFICATION SETTINGS directly ────────────────────────────────
+        @JavascriptInterface
+        fun openNotificationSettings() {
+            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                }
+            } else {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:${packageName}")
+                }
+            }
+            startActivity(intent)
         }
     }
 }
