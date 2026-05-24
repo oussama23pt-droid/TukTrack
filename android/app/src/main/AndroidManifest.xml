@@ -1,46 +1,51 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-<!--  ── Internet ──  -->
+<!--   ── Internet & Network ──   -->
 <uses-permission android:name="android.permission.INTERNET"/>
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-<!--  ── Location — foreground AND background ──  -->
+<uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
+<!--   ── Location — foreground AND background ──   -->
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
-<!--  ── Foreground service for persistent location ──  -->
+<!--   ── Foreground service for persistent GPS tracking ──   -->
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
-<!--  ── Persistent status-bar notification (Android 13+) ──  -->
+<!--   ── Persistent status-bar notification (Android 13+) ──   -->
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-<!--  ── Keep CPU alive while tracking ──  -->
+<!--   ── Keep CPU alive while tracking (screen off) ──   -->
 <uses-permission android:name="android.permission.WAKE_LOCK"/>
-<!--  ── Display over other apps ──  -->
+<!--   ── Prevent system from stopping our service ──   -->
+<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+<!--   ── Display over other apps (overlay) ──   -->
 <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-<!--  ── Restart tracking after reboot ──  -->
+<!--   ── Restart tracking after phone reboot ──   -->
 <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-<!--  ── Vibration for SOS ──  -->
+<!--   ── Vibration for SOS alerts ──   -->
 <uses-permission android:name="android.permission.VIBRATE"/>
-<application android:allowBackup="true" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:roundIcon="@mipmap/ic_launcher_round" android:supportsRtl="true" android:theme="@style/AppTheme" android:usesCleartextTraffic="true" android:hardwareAccelerated="true">
+<application android:allowBackup="true" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:roundIcon="@mipmap/ic_launcher_round" android:supportsRtl="true" android:theme="@style/AppTheme" android:usesCleartextTraffic="true" android:hardwareAccelerated="true" android:name="android.app.Application">
 <activity android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode" android:name=".MainActivity" android:label="@string/title_activity_main" android:theme="@style/AppTheme.NoActionBarLaunch" android:launchMode="singleTask" android:exported="true" android:showOnLockScreen="true">
 <intent-filter>
 <action android:name="android.intent.action.MAIN"/>
 <category android:name="android.intent.category.LAUNCHER"/>
 </intent-filter>
 </activity>
-<!--  ── OUR background GPS foreground service ──  -->
-<service android:name=".LocationForegroundService" android:foregroundServiceType="location" android:exported="false"/>
-<!--  Boot receiver — restarts service after phone reboot if driver was online  -->
+<!--   Background GPS foreground service — keeps running when app is minimised   -->
+<service android:name=".LocationForegroundService" android:foregroundServiceType="location" android:exported="false" android:stopWithTask="false"/>
+<!--   Boot receiver — restarts service after reboot AND HTC quick-boot   -->
 <receiver android:name=".BootReceiver" android:exported="true">
 <intent-filter>
 <action android:name="android.intent.action.BOOT_COMPLETED"/>
+<action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+<action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
 </intent-filter>
 </receiver>
-<!--  FCM push notifications  -->
+<!--   FCM push notifications   -->
 <service android:name=".TukTrackFirebaseService" android:exported="false">
 <intent-filter>
 <action android:name="com.google.firebase.MESSAGING_EVENT"/>
 </intent-filter>
 </service>
-<!--  @capacitor/local-notifications channel config  -->
+<!--   Capacitor LocalNotifications channel defaults   -->
 <meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_id" android:value="tuktrack_alerts"/>
 <meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_name" android:value="TukTrack Alertas"/>
 <meta-data android:name="com.capacitorjs.plugins.localnotifications.default_channel_importance" android:value="4"/>
