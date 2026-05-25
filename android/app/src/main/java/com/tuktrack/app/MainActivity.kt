@@ -99,16 +99,6 @@ class MainActivity : BridgeActivity() {
         @JavascriptInterface
         fun showAlertNotification(title: String, message: String, notifId: Int) {
             try {
-                TukTrackFirebaseService().apply {
-                    // attachBaseContext is normally called by the framework; we call
-                    // showPushNotification via the application context instead.
-                }.let {
-                    // Use applicationContext so the service helper can reach resources
-                    val svc = TukTrackFirebaseService()
-                    svc.attachBaseContext(applicationContext)   // needed for resources
-                    // Delegate to service helper — reuses same channel + builder logic
-                }
-                // Simpler: just build and show directly here using applicationContext
                 showAlertNotificationInternal(title, message, notifId)
             } catch (e: Exception) {
                 android.util.Log.e("TukTrack", "showAlertNotification error", e)
