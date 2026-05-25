@@ -5,7 +5,7 @@ workflows:
     environment:
       android_signing:
         - tuktrack
-      node: 18
+      node: 20
       java: 17
       vars:
         PACKAGE_NAME: "com.tuktrack.app"
@@ -34,7 +34,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - your@email.com          # change to your email
+          - your@email.com
         notify:
           success: true
           failure: true
