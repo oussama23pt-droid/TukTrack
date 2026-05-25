@@ -1,5 +1,6 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
+apply plugin: 'com.google.gms.google-services'
 
 android {
     namespace "com.tuktrack.app"
@@ -46,4 +47,9 @@ dependencies {
     implementation project(':capacitor-local-notifications')
     implementation project(':capacitor-community-background-geolocation')
     implementation 'com.google.android.gms:play-services-location:21.2.0'
+
+    // Firebase BOM — manages all Firebase library versions consistently
+    implementation platform('com.google.firebase:firebase-bom:33.1.0')
+    // FCM push notifications
+    implementation 'com.google.firebase:firebase-messaging-ktx'
 }
