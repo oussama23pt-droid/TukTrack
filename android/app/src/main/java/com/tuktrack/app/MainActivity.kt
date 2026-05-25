@@ -204,6 +204,11 @@ class MainActivity : BridgeActivity() {
         // ── Foreground service (persistent online status notification) ────────
         @JavascriptInterface
         fun showForegroundNotification(title: String, message: String, shiftStartMs: Long) {
+            // Persist so BootReceiver can restart the service after a reboot
+            getSharedPreferences("tuktrack", MODE_PRIVATE).edit()
+                .putBoolean("driver_was_online", true)
+                .putLong("shift_start_ms", shiftStartMs)
+                .apply()
             val intent = Intent(this@MainActivity, LocationForegroundService::class.java).apply {
                 putExtra(LocationForegroundService.EXTRA_SHIFT_START, shiftStartMs)
             }
@@ -212,6 +217,10 @@ class MainActivity : BridgeActivity() {
 
         @JavascriptInterface
         fun hideForegroundNotification() {
+            // Clear the online flag so BootReceiver does not restart the service
+            getSharedPreferences("tuktrack", MODE_PRIVATE).edit()
+                .putBoolean("driver_was_online", false)
+                .apply()
             stopService(Intent(this@MainActivity, LocationForegroundService::class.java))
         }
     }
