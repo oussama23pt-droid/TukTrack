@@ -201,11 +201,26 @@ class MainActivity : BridgeActivity() {
         // ── Settings shortcuts ────────────────────────────────────────────────
         @JavascriptInterface
         fun openLocationSettings() {
-            val intent = Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:${packageName}")
+            // On Android 11+ jump directly to the location permission page
+            // so the user sees "Allow all the time" / "Allow only while using" etc.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    val intent = Intent("android.intent.action.MANAGE_APP_PERMISSION").apply {
+                        putExtra("android.intent.extra.PACKAGE_NAME", packageName)
+                        putExtra("android.intent.extra.PERMISSION_GROUP_NAME",
+                            "android.permission-group.LOCATION")
+                    }
+                    startActivity(intent)
+                    return
+                } catch (_: Exception) { /* fall through */ }
+            }
+            // Fallback: open the general app details page
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:${packageName}")
+                )
             )
-            startActivity(intent)
         }
 
         @JavascriptInterface
