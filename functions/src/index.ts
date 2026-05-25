@@ -311,55 +311,186 @@ export const cancelSubscription = onCall(async (request: CallableRequest<any>) =
   }
 });
 
-// ─── 5. sendDriverNotification ────────────────────────────────────────────────
-// Triggered when manager creates a notification in Firestore
-// Sends push notification to all drivers via OneSignal
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+// ─── 5. Push Notification System ─────────────────────────────────────────────
+// Sends FCM push notifications for key events:
+//   - SOS alerts → manager
+//   - Shift start → all drivers of that manager
+//   - Trip start/cancel → manager
+//   - Manager notifications → drivers (general)
+import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 
+/** Helper: send FCM push to a list of FCM tokens */
+async function sendFcmPush(
+  tokens: string[],
+  title: string,
+  body: string,
+  data?: Record<string, string>
+): Promise<void> {
+  if (!tokens.length) return;
+  const unique = [...new Set(tokens.filter(Boolean))];
+  try {
+    const response = await admin.messaging().sendEachForMulticast({
+      tokens: unique,
+      notification: { title, body },
+      data: data || {},
+      android: {
+        priority: "high",
+        notification: {
+          channelId: "tuktrack_alerts",
+          priority: "high",
+          defaultSound: true,
+        },
+      },
+    });
+    console.log(`FCM sent: ${response.successCount} ok, ${response.failureCount} failed`);
+  } catch (err) {
+    console.error("FCM sendEachForMulticast error:", err);
+  }
+}
+
+/** Helper: get FCM tokens for all drivers under a manager */
+async function getDriverTokens(managerId: string): Promise<string[]> {
+  const snap = await db
+    .collection("users")
+    .where("managerId", "==", managerId)
+    .where("role", "==", "driver")
+    .get();
+  return snap.docs.flatMap((d) => {
+    const data = d.data();
+    const tokens: string[] = [];
+    if (data.fcmToken) tokens.push(data.fcmToken);
+    if (Array.isArray(data.fcmTokens)) tokens.push(...data.fcmTokens);
+    return tokens;
+  });
+}
+
+/** Helper: get FCM token(s) for a manager */
+async function getManagerTokens(managerId: string): Promise<string[]> {
+  const snap = await db.collection("users").doc(managerId).get();
+  const data = snap.data();
+  if (!data) return [];
+  const tokens: string[] = [];
+  if (data.fcmToken) tokens.push(data.fcmToken);
+  if (Array.isArray(data.fcmTokens)) tokens.push(...data.fcmTokens);
+  return tokens;
+}
+
+// 5a. notifications collection — push to drivers (general manager broadcasts)
 export const sendDriverNotification = onDocumentCreated(
   "notifications/{notifId}",
   async (event) => {
     const notif = event.data?.data();
-    if (!notif) return;
-    if (!notif.isForDrivers) return; // only send to drivers
+    if (!notif || notif.pushSent) return;
 
-    const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID;
-    const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY;
+    const managerId: string = notif.managerId;
+    if (!managerId) return;
 
-    if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) {
-      console.error("OneSignal keys not configured");
-      return;
+    let tokens: string[] = [];
+    let title: string = notif.title || "TukTrack";
+    let body: string = notif.message || notif.body || "";
+
+    if (notif.isForDrivers) {
+      // Broadcast to all drivers under this manager
+      tokens = await getDriverTokens(managerId);
+    } else {
+      // Send to manager
+      tokens = await getManagerTokens(managerId);
     }
 
-    try {
-      const response = await fetch("https://onesignal.com/api/v1/notifications", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Basic ${ONESIGNAL_REST_API_KEY}`,
-        },
-        body: JSON.stringify({
-          app_id: ONESIGNAL_APP_ID,
-          included_segments: ["All"], // send to all subscribed drivers
-          headings: { en: notif.title || "TukTrack", pt: notif.title || "TukTrack" },
-          contents: { en: notif.message || "", pt: notif.message || "" },
-          data: {
-            type: notif.type || "info",
-            notifId: event.params.notifId,
-          },
-          android_channel_id: "tuktrack-alerts",
-          priority: 10,
-          ttl: 3600,
-        }),
+    if (tokens.length) {
+      await sendFcmPush(tokens, title, body, {
+        type: notif.type || "info",
+        notifId: event.params.notifId,
       });
-
-      const result = await response.json();
-      console.log("OneSignal push sent:", JSON.stringify(result));
-
-      // Mark notification as pushed
-      await event.data?.ref.update({ pushSent: true, pushedAt: admin.firestore.Timestamp.now() });
-    } catch (err) {
-      console.error("OneSignal push failed:", err);
     }
+
+    await event.data?.ref.update({
+      pushSent: true,
+      pushedAt: admin.firestore.Timestamp.now(),
+    });
+  }
+);
+
+// 5b. SOS alerts — push manager immediately when a new SOS is created
+export const sendSosNotification = onDocumentCreated(
+  "sos_alerts/{sosId}",
+  async (event) => {
+    const sos = event.data?.data();
+    if (!sos || sos.status !== "active") return;
+
+    const managerId: string = sos.managerId;
+    if (!managerId) return;
+
+    const tokens = await getManagerTokens(managerId);
+    await sendFcmPush(
+      tokens,
+      "🆘 ALERTA SOS!",
+      `O motorista ${sos.driverName || "Desconhecido"} acionou o SOS. Verifique a aplicação imediatamente!`,
+      { type: "sos", sosId: event.params.sosId }
+    );
+  }
+);
+
+// 5c. Shift created/updated → notify drivers when shift goes active
+export const sendShiftNotification = onDocumentCreated(
+  "shifts/{shiftId}",
+  async (event) => {
+    const shift = event.data?.data();
+    if (!shift || shift.status !== "active") return;
+
+    const managerId: string = shift.managerId;
+    if (!managerId) return;
+
+    const tokens = await getDriverTokens(managerId);
+    await sendFcmPush(
+      tokens,
+      "🟢 Turno Iniciado!",
+      "O gestor iniciou o turno de operações. Por favor, fiquem atentos às rotas e comunicações.",
+      { type: "shift_start", shiftId: event.params.shiftId }
+    );
+  }
+);
+
+// 5d. Trip events — notify manager when a driver starts or cancels a trip
+export const sendTripNotification = onDocumentCreated(
+  "trips/{tripId}",
+  async (event) => {
+    const trip = event.data?.data();
+    if (!trip) return;
+
+    const managerId: string = trip.managerId;
+    if (!managerId) return;
+
+    const tokens = await getManagerTokens(managerId);
+    await sendFcmPush(
+      tokens,
+      "🛺 Viagem Iniciada",
+      `${trip.driverName || "Motorista"} iniciou uma viagem — ${trip.description || "Rota Manual"}.`,
+      { type: "trip_start", tripId: event.params.tripId }
+    );
+  }
+);
+
+export const sendTripCancelNotification = onDocumentUpdated(
+  "trips/{tripId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+
+    // Only fire when status changes TO cancelled
+    if (before.status === "cancelled" || after.status !== "cancelled") return;
+
+    const managerId: string = after.managerId;
+    if (!managerId) return;
+
+    const tokens = await getManagerTokens(managerId);
+    const reason = after.cancelReason ? ` Motivo: ${after.cancelReason}` : "";
+    await sendFcmPush(
+      tokens,
+      "🚫 Viagem Cancelada",
+      `${after.driverName || "Motorista"} cancelou a viagem.${reason}`,
+      { type: "trip_cancel", tripId: event.params.tripId }
+    );
   }
 );
