@@ -138,6 +138,56 @@ export default function DriverDashboard() {
     fetchManager();
   }, [userData?.managerId]);
 
+  // ── CHECK PERMISSIONS ON LOGIN ─────────────────────────────────────────────
+  // Runs once when the driver dashboard mounts (i.e. right after login).
+  // Shows overlay modal first, then background location modal.
+  // Uses AndroidBridge live checks — localStorage is only used as cache.
+  useEffect(() => {
+    const bridge = (window as any).AndroidBridge;
+
+    const checkOverlay = () => {
+      // If AndroidBridge says not granted (live check), reset the cache
+      if (bridge?.isOverlayGranted && !bridge.isOverlayGranted()) {
+        overlayPermissionGranted.current = false;
+        localStorage.removeItem('tuktrack_overlay_granted');
+      }
+      return overlayPermissionGranted.current;
+    };
+
+    const checkBgLocation = () => {
+      if (bridge?.isBackgroundLocationGranted && !bridge.isBackgroundLocationGranted()) {
+        backgroundLocationGranted.current = false;
+        localStorage.removeItem('tuktrack_bg_location_granted');
+      }
+      return backgroundLocationGranted.current;
+    };
+
+    // Small delay so the dashboard renders first
+    const timer = setTimeout(() => {
+      if (!checkOverlay()) {
+        setShowOverlayPermissionModal(true);
+      } else if (!checkBgLocation()) {
+        setShowBackgroundPermissionModal(true);
+      }
+    }, 1200);
+
+    // Also re-check when driver returns from Settings screen
+    const onPermissionResult = () => {
+      if (!checkOverlay()) {
+        setShowOverlayPermissionModal(true);
+      } else if (!checkBgLocation()) {
+        setShowBackgroundPermissionModal(true);
+      }
+    };
+    window.addEventListener('permissionResult', onPermissionResult);
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('permissionResult', onPermissionResult);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Check location permission on mount
   useEffect(() => {
     navigator.geolocation.getCurrentPosition(
@@ -934,11 +984,12 @@ export default function DriverDashboard() {
               }
             } catch(e) {}
 
-            // STEP 2: Request permissions — always show regardless of platform
-            if (!overlayPermissionGranted.current) {
+            // STEP 2: Permissions were already requested on login.
+            // Only re-show if explicitly skipped (both still false after login prompt).
+            if (!overlayPermissionGranted.current && !backgroundLocationGranted.current) {
               setTimeout(() => setShowOverlayPermissionModal(true), 800);
             } else if (!backgroundLocationGranted.current) {
-              setTimeout(() => setShowBackgroundPermissionModal(true), 800);
+              setTimeout(() => setShowBackgroundPermissionModal(true), 500);
             }
             // STEP 3: Show persistent status bar notification
             setAppBadge(1);
@@ -1911,44 +1962,34 @@ export default function DriverDashboard() {
 
               <div className="flex flex-col space-y-3">
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     setShowOverlayPermissionModal(false);
-                    overlayPermissionGranted.current = true;
-                    localStorage.setItem('tuktrack_overlay_granted', 'true');
 
-                    // Use AndroidBridge to open exact overlay settings page for TukTrack
-                    // This goes directly to the "Appear on top" toggle for TukTrack
-                    try {
-                      const bridge = (window as any).AndroidBridge;
-                      if (bridge?.openOverlaySettings) {
-                        bridge.openOverlaySettings(); // opens package-specific overlay settings
-                      } else {
-                        // Capacitor fallback
-                        const NativeSettings = (window as any)?.Capacitor?.Plugins?.NativeSettings;
-                        if (NativeSettings?.openAndroid) {
-                          await NativeSettings.openAndroid({ option: 'appDrawOverlays' });
-                        }
+                    // Opens ACTION_MANAGE_OVERLAY_PERMISSION with this app's package URI.
+                    // Android takes the driver DIRECTLY to TukTrack's overlay toggle.
+                    // One tap to enable — no list to scroll through.
+                    const bridge = (window as any).AndroidBridge;
+                    bridge?.openOverlaySettings?.();
+
+                    // When driver comes back from Settings, show the location modal next.
+                    // 'permissionResult' is fired by MainActivity.onActivityResult().
+                    const onReturn = () => {
+                      window.removeEventListener('permissionResult', onReturn);
+                      const granted = bridge?.isOverlayGranted?.() ?? true;
+                      overlayPermissionGranted.current = granted;
+                      if (granted) localStorage.setItem('tuktrack_overlay_granted', 'true');
+                      if (!backgroundLocationGranted.current) {
+                        setTimeout(() => setShowBackgroundPermissionModal(true), 500);
                       }
-                    } catch (e) {
-                      console.warn('Could not open overlay settings:', e);
-                    }
-
-                    // When driver returns, check if granted and show location modal
-                    const checkAndNext = () => {
-                      setTimeout(() => {
-                        if (!backgroundLocationGranted.current) {
-                          setShowBackgroundPermissionModal(true);
-                        }
-                      }, 1500);
                     };
-                    // Listen for app resume
-                    const handleResume = () => {
-                      document.removeEventListener('visibilitychange', handleResume);
-                      checkAndNext();
-                    };
-                    document.addEventListener('visibilitychange', handleResume);
-                    // Fallback timer
-                    setTimeout(checkAndNext, 4000);
+                    window.addEventListener('permissionResult', onReturn);
+                    // Fallback: if event never fires, check after 8s
+                    setTimeout(() => {
+                      window.removeEventListener('permissionResult', onReturn);
+                      if (!backgroundLocationGranted.current) {
+                        setShowBackgroundPermissionModal(true);
+                      }
+                    }, 8000);
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm"
                 >
@@ -1999,32 +2040,28 @@ export default function DriverDashboard() {
               </p>
               <div className="flex flex-col space-y-3">
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     setShowBackgroundPermissionModal(false);
-                    backgroundLocationGranted.current = true;
-                    localStorage.setItem('tuktrack_bg_location_granted', 'true');
 
-                    // Use AndroidBridge to open TukTrack location permission settings directly
-                    // Driver lands on the "Allow all the time" screen immediately
-                    try {
-                      const bridge = (window as any).AndroidBridge;
-                      if (bridge?.openLocationSettings) {
-                        bridge.openLocationSettings(); // opens app-specific location permission page
-                      } else {
-                        // Capacitor BGGeo fallback
-                        const BGGeo = (window as any)?.Capacitor?.Plugins?.BackgroundGeolocation;
-                        if (BGGeo?.openSettings) {
-                          await BGGeo.openSettings();
-                        } else {
-                          const NativeSettings = (window as any)?.Capacitor?.Plugins?.NativeSettings;
-                          if (NativeSettings?.openAndroid) {
-                            await NativeSettings.openAndroid({ option: 'applicationDetails' });
-                          }
-                        }
-                      }
-                    } catch (e) {
-                      console.warn('Could not open location settings:', e);
-                    }
+                    // Opens the app's detail page in Android Settings.
+                    // Driver taps: Permissions → Location → Allow all the time.
+                    // This is the only reliable way to get background location on Android 11+.
+                    const bridge = (window as any).AndroidBridge;
+                    bridge?.openLocationSettings?.();
+
+                    // When driver returns from Settings, confirm and save
+                    const onReturn = () => {
+                      window.removeEventListener('permissionResult', onReturn);
+                      const granted = bridge?.isBackgroundLocationGranted?.() ?? true;
+                      backgroundLocationGranted.current = granted;
+                      if (granted) localStorage.setItem('tuktrack_bg_location_granted', 'true');
+                    };
+                    window.addEventListener('permissionResult', onReturn);
+                    setTimeout(() => {
+                      window.removeEventListener('permissionResult', onReturn);
+                      backgroundLocationGranted.current = true;
+                      localStorage.setItem('tuktrack_bg_location_granted', 'true');
+                    }, 30000);
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
                 >
