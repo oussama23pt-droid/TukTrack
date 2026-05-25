@@ -18,6 +18,7 @@ class MainActivity : BridgeActivity() {
     companion object {
         private const val REQUEST_FINE_LOCATION       = 1000
         private const val REQUEST_BACKGROUND_LOCATION = 1001
+        private const val REQUEST_NOTIFICATIONS       = 1002
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -26,6 +27,21 @@ class MainActivity : BridgeActivity() {
         // Eagerly fetch / refresh the FCM token and cache it so
         // AndroidBridge.getFcmToken() can return it synchronously.
         refreshFcmToken()
+
+        // Android 13+ (API 33) requires explicit POST_NOTIFICATIONS permission.
+        // Show the system dialog on first launch so the user can allow it.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    REQUEST_NOTIFICATIONS
+                )
+            }
+        }
     }
 
     override fun onStart() {
