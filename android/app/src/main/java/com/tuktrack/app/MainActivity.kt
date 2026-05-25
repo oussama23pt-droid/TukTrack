@@ -65,7 +65,6 @@ class MainActivity : BridgeActivity() {
                     .getString("driver_uid", null)
                 if (!uid.isNullOrBlank()) {
                     TukTrackFirebaseService().also {
-                        // Bind context via reflection isn't needed; call the static helper
                         updateFcmTokenDirectly(uid, token)
                     }
                 }
@@ -102,16 +101,6 @@ class MainActivity : BridgeActivity() {
 
     inner class AndroidBridge {
 
-        // ── Push / alert notifications ───────────────────────────────────────
-        //
-        // Called by JS (useFcmToken.ts and DriverDashboard.tsx) to pop a
-        // heads-up push notification visible in the Android notification bar.
-        //
-        // Parameters:
-        //   title   — notification title
-        //   message — notification body text
-        //   notifId — unique int so multiple alerts don't overwrite each other
-
         @JavascriptInterface
         fun showAlertNotification(title: String, message: String, notifId: Int) {
             try {
@@ -120,11 +109,6 @@ class MainActivity : BridgeActivity() {
                 android.util.Log.e("TukTrack", "showAlertNotification error", e)
             }
         }
-
-        // ── FCM token accessor ────────────────────────────────────────────────
-        //
-        // Returns the cached FCM registration token so JS can register it
-        // with Firestore without going through the Capacitor plugin.
 
         @JavascriptInterface
         fun getFcmToken(): String {
@@ -202,35 +186,38 @@ class MainActivity : BridgeActivity() {
         @JavascriptInterface
         fun openLocationSettings() {
             // Strategy 1 (Android 11+ / API 30+):
-            // Jump directly to the Location permission page for this app,
-            // which shows "Allow all the time / Allow only while using / Ask every time / Don't allow".
+            // Jump directly to the Location permission page using string literals
+            // to avoid unresolved references on older SDK compile targets.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 try {
-                    val intent = Intent(Intent.ACTION_MANAGE_APP_PERMISSIONS).apply {
-                        putExtra(Intent.EXTRA_PACKAGE_NAME, packageName)
-                        putExtra("android.intent.extra.PERMISSION_GROUP_NAME",
-                            android.Manifest.permission_group.LOCATION)
+                    val intent = Intent("android.intent.action.MANAGE_APP_PERMISSIONS").apply {
+                        putExtra("android.intent.extra.PACKAGE_NAME", packageName)
+                        putExtra(
+                            "android.intent.extra.PERMISSION_GROUP_NAME",
+                            "android.permission-group.LOCATION"
+                        )
                     }
                     startActivity(intent)
                     return
-                } catch (_: Exception) { /* fall through to next strategy */ }
+                } catch (_: Exception) { /* fall through */ }
             }
 
             // Strategy 2 (Android 6–10 / API 23–29):
-            // Use the undocumented but widely supported permission group intent.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 try {
                     val intent = Intent("android.intent.action.MANAGE_APP_PERMISSION").apply {
                         putExtra("android.intent.extra.PACKAGE_NAME", packageName)
-                        putExtra("android.intent.extra.PERMISSION_GROUP_NAME",
-                            android.Manifest.permission_group.LOCATION)
+                        putExtra(
+                            "android.intent.extra.PERMISSION_GROUP_NAME",
+                            "android.permission-group.LOCATION"
+                        )
                     }
                     startActivity(intent)
                     return
-                } catch (_: Exception) { /* fall through to final fallback */ }
+                } catch (_: Exception) { /* fall through */ }
             }
 
-            // Strategy 3 — final fallback: open the general app details page.
+            // Strategy 3 — final fallback: general app details page.
             startActivity(
                 Intent(
                     Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
@@ -251,7 +238,6 @@ class MainActivity : BridgeActivity() {
         // ── Foreground service (persistent online status notification) ────────
         @JavascriptInterface
         fun showForegroundNotification(title: String, message: String, shiftStartMs: Long) {
-            // Persist so BootReceiver can restart the service after a reboot
             getSharedPreferences("tuktrack", MODE_PRIVATE).edit()
                 .putBoolean("driver_was_online", true)
                 .putLong("shift_start_ms", shiftStartMs)
@@ -264,7 +250,6 @@ class MainActivity : BridgeActivity() {
 
         @JavascriptInterface
         fun hideForegroundNotification() {
-            // Clear the online flag so BootReceiver does not restart the service
             getSharedPreferences("tuktrack", MODE_PRIVATE).edit()
                 .putBoolean("driver_was_online", false)
                 .apply()
