@@ -77,9 +77,16 @@ export default defineConfig(({ mode }) => {
       }),
     ],
     build: {
-      // ✅ No "external" here — Capacitor packages are mocked on web/Vercel
-      // so they must be bundled, not excluded.
-      rollupOptions: {},
+      rollupOptions: {
+        plugins: [
+          {
+            name: 'crypto-polyfill',
+            banner() {
+              return `import { webcrypto } from 'node:crypto'; if (typeof globalThis.crypto === 'undefined') { globalThis.crypto = webcrypto; }`;
+            },
+          },
+        ],
+      },
     },
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
