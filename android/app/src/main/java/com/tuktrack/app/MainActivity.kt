@@ -342,28 +342,13 @@ class MainActivity : BridgeActivity() {
         // Permissions → Location → "Allow all the time" in a single tap from that screen.
         // On Samsung One UI, MIUI, and stock AOSP this is the only reliable path.
         private fun openLocationPermissionPage() {
-            try {
-                // Try the direct permission-group intent first (works on stock Android 10+)
-                // This lands the user exactly on the Location permission choice screen.
-                val intent = Intent(Intent.ACTION_MANAGE_APP_PERMISSIONS).apply {
-                    putExtra(Intent.EXTRA_PACKAGE_NAME, packageName)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                startActivity(intent)
-            } catch (e: Exception) {
-                // Fallback: app details page — driver taps Permissions → Location
-                try {
-                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.fromParts("package", packageName, null)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    })
-                } catch (e2: Exception) {
-                    // Last resort
-                    startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    })
-                }
-            }
+            // ACTION_APPLICATION_DETAILS_SETTINGS is the only cross-OEM reliable intent
+            // that gets the driver to Permissions → Location → "Allow all the time".
+            // ACTION_MANAGE_APP_PERMISSIONS is NOT a public SDK constant — do not use it.
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
         }
 
         @JavascriptInterface
