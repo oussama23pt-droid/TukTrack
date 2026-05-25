@@ -20,6 +20,13 @@ workflows:
       - name: Sync Capacitor
         script: npx cap sync android
 
+      - name: Fix Gradle wrapper jar
+        script: |
+          cd android
+          mkdir -p gradle/wrapper
+          curl -fsSL "https://github.com/gradle/gradle/raw/v8.4.0/gradle/wrapper/gradle-wrapper.jar" \
+            -o gradle/wrapper/gradle-wrapper.jar
+
       - name: Set executable permission on gradlew
         script: chmod +x android/gradlew
 
