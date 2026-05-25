@@ -60,6 +60,10 @@ class LocationForegroundService : Service() {
     private var shiftStartMs: Long = 0L
     private var lastFirestoreWriteMs: Long = 0L
 
+    // Dedicated background thread for GPS callbacks — never blocks the UI thread
+    private val gpsThread = android.os.HandlerThread("TukTrackGPS").also { it.start() }
+    private val gpsLooper get() = gpsThread.looper
+
     private val stopReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == ACTION_STOP) stopSelf()
@@ -99,14 +103,25 @@ class LocationForegroundService : Service() {
         shiftStartMs = intent?.getLongExtra(EXTRA_SHIFT_START, 0L) ?: 0L
         if (shiftStartMs == 0L) shiftStartMs = System.currentTimeMillis()
 
-        // Must call within 5 s — makes notification non-dismissable
-        startForeground(NOTIFICATION_ID, buildNotification())
+        // Must call startForeground within 5 s of onStartCommand.
+        // Android 14 (API 34)+ requires the foreground service type to be declared
+        // both in the manifest AND passed here at runtime.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // API 34
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification(),
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
+
         startLocationUpdates()
 
         handler.removeCallbacks(timerRunnable)
         handler.post(timerRunnable)
 
-        return START_STICKY
+        return START_STICKY  // OS restarts service automatically if killed
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -143,6 +158,7 @@ class LocationForegroundService : Service() {
         try { fusedClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
         try { wakeLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
         try { unregisterReceiver(stopReceiver) } catch (_: Exception) {}
+        try { gpsThread.quitSafely() } catch (_: Exception) {}
     }
 
     // ── GPS ────────────────────────────────────────────────────────────────────
@@ -164,7 +180,7 @@ class LocationForegroundService : Service() {
         }
 
         try {
-            fusedClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+            fusedClient.requestLocationUpdates(request, locationCallback, gpsLooper)
         } catch (e: SecurityException) {
             stopSelf()
         }
