@@ -14,7 +14,8 @@ workflows:
       - name: Install Node dependencies
         script: |
           rm -rf node_modules package-lock.json
-          npm install
+          npm install --ignore-scripts
+          npm rebuild
 
       - name: Build web assets
         script: npm run build
