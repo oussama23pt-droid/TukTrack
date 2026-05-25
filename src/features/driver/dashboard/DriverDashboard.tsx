@@ -138,52 +138,75 @@ export default function DriverDashboard() {
     fetchManager();
   }, [userData?.managerId]);
 
-  // ── CHECK PERMISSIONS ON LOGIN ─────────────────────────────────────────────
-  // Runs once when the driver dashboard mounts (i.e. right after login).
-  // Shows overlay modal first, then background location modal.
-  // Uses AndroidBridge live checks — localStorage is only used as cache.
+  // ── PERMISSION CHECK ON LOGIN ───────────────────────────────────────────────
+  // Runs once on dashboard mount. Waits for AndroidBridge to be ready,
+  // then checks live state. Only shows modal if permission is truly missing.
+  // Remembers grants in localStorage so driver is never asked again.
   useEffect(() => {
-    const bridge = (window as any).AndroidBridge;
+    let cancelled = false;
 
-    const checkOverlay = () => {
-      // If AndroidBridge says not granted (live check), reset the cache
-      if (bridge?.isOverlayGranted && !bridge.isOverlayGranted()) {
-        overlayPermissionGranted.current = false;
-        localStorage.removeItem('tuktrack_overlay_granted');
+    const run = () => {
+      if (cancelled) return;
+      const bridge = (window as any).AndroidBridge;
+
+      // OVERLAY — check live, update cache if granted
+      const overlayOk = bridge?.isOverlayGranted
+        ? bridge.isOverlayGranted()
+        : overlayPermissionGranted.current;
+      if (overlayOk) {
+        overlayPermissionGranted.current = true;
+        localStorage.setItem('tuktrack_overlay_granted', 'true');
       }
-      return overlayPermissionGranted.current;
-    };
 
-    const checkBgLocation = () => {
-      if (bridge?.isBackgroundLocationGranted && !bridge.isBackgroundLocationGranted()) {
-        backgroundLocationGranted.current = false;
-        localStorage.removeItem('tuktrack_bg_location_granted');
+      // BACKGROUND LOCATION — check live, update cache if granted
+      const bgOk = bridge?.isBackgroundLocationGranted
+        ? bridge.isBackgroundLocationGranted()
+        : backgroundLocationGranted.current;
+      if (bgOk) {
+        backgroundLocationGranted.current = true;
+        localStorage.setItem('tuktrack_bg_location_granted', 'true');
       }
-      return backgroundLocationGranted.current;
-    };
 
-    // Small delay so the dashboard renders first
-    const timer = setTimeout(() => {
-      if (!checkOverlay()) {
-        setShowOverlayPermissionModal(true);
-      } else if (!checkBgLocation()) {
-        setShowBackgroundPermissionModal(true);
-      }
-    }, 1200);
-
-    // Also re-check when driver returns from Settings screen
-    const onPermissionResult = () => {
-      if (!checkOverlay()) {
-        setShowOverlayPermissionModal(true);
-      } else if (!checkBgLocation()) {
-        setShowBackgroundPermissionModal(true);
+      // Show first missing permission modal
+      if (!overlayOk) {
+        setTimeout(() => { if (!cancelled) setShowOverlayPermissionModal(true); }, 1200);
+      } else if (!bgOk) {
+        setTimeout(() => { if (!cancelled) setShowBackgroundPermissionModal(true); }, 1200);
       }
     };
-    window.addEventListener('permissionResult', onPermissionResult);
+
+    // Wait for bridge to be injected (MainActivity fires 'androidBridgeReady')
+    if ((window as any).AndroidBridge) {
+      run();
+    } else {
+      window.addEventListener('androidBridgeReady', run, { once: true });
+      // Fallback: run after 3s even if event never fires
+      setTimeout(run, 3000);
+    }
+
+    // Re-check when driver returns from Settings
+    const onReturn = () => {
+      if (cancelled) return;
+      const bridge = (window as any).AndroidBridge;
+      const overlayOk = bridge?.isOverlayGranted ? bridge.isOverlayGranted() : true;
+      const bgOk = bridge?.isBackgroundLocationGranted ? bridge.isBackgroundLocationGranted() : true;
+      if (overlayOk) {
+        overlayPermissionGranted.current = true;
+        localStorage.setItem('tuktrack_overlay_granted', 'true');
+      }
+      if (bgOk) {
+        backgroundLocationGranted.current = true;
+        localStorage.setItem('tuktrack_bg_location_granted', 'true');
+      }
+      if (!overlayOk) setShowOverlayPermissionModal(true);
+      else if (!bgOk) setShowBackgroundPermissionModal(true);
+    };
+    window.addEventListener('permissionResult', onReturn);
 
     return () => {
-      clearTimeout(timer);
-      window.removeEventListener('permissionResult', onPermissionResult);
+      cancelled = true;
+      window.removeEventListener('androidBridgeReady', run);
+      window.removeEventListener('permissionResult', onReturn);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -984,12 +1007,11 @@ export default function DriverDashboard() {
               }
             } catch(e) {}
 
-            // STEP 2: Permissions were already requested on login.
-            // Only re-show if explicitly skipped (both still false after login prompt).
-            if (!overlayPermissionGranted.current && !backgroundLocationGranted.current) {
+            // STEP 2: Request permissions — always show regardless of platform
+            if (!overlayPermissionGranted.current) {
               setTimeout(() => setShowOverlayPermissionModal(true), 800);
             } else if (!backgroundLocationGranted.current) {
-              setTimeout(() => setShowBackgroundPermissionModal(true), 500);
+              setTimeout(() => setShowBackgroundPermissionModal(true), 800);
             }
             // STEP 3: Show persistent status bar notification
             setAppBadge(1);
@@ -1964,32 +1986,40 @@ export default function DriverDashboard() {
                 <button
                   onClick={() => {
                     setShowOverlayPermissionModal(false);
-
-                    // Opens ACTION_MANAGE_OVERLAY_PERMISSION with this app's package URI.
-                    // Android takes the driver DIRECTLY to TukTrack's overlay toggle.
-                    // One tap to enable — no list to scroll through.
                     const bridge = (window as any).AndroidBridge;
+
+                    // Goes directly to TukTrack's overlay toggle in Android Settings.
+                    // ACTION_MANAGE_OVERLAY_PERMISSION + package URI = exact page, one toggle.
                     bridge?.openOverlaySettings?.();
 
-                    // When driver comes back from Settings, show the location modal next.
-                    // 'permissionResult' is fired by MainActivity.onActivityResult().
+                    // When driver returns, read LIVE state from bridge (not localStorage).
+                    // Only save as granted if bridge confirms it.
                     const onReturn = () => {
                       window.removeEventListener('permissionResult', onReturn);
-                      const granted = bridge?.isOverlayGranted?.() ?? true;
+                      const granted = bridge?.isOverlayGranted ? bridge.isOverlayGranted() : false;
                       overlayPermissionGranted.current = granted;
                       if (granted) localStorage.setItem('tuktrack_overlay_granted', 'true');
+                      // Show background location modal next regardless
                       if (!backgroundLocationGranted.current) {
                         setTimeout(() => setShowBackgroundPermissionModal(true), 500);
                       }
                     };
                     window.addEventListener('permissionResult', onReturn);
-                    // Fallback: if event never fires, check after 8s
+                    // Fallback: visibilitychange if permissionResult never fires
+                    const onVisible = () => {
+                      if (document.visibilityState === 'visible') {
+                        document.removeEventListener('visibilitychange', onVisible);
+                        setTimeout(onReturn, 300);
+                      }
+                    };
+                    document.addEventListener('visibilitychange', onVisible);
                     setTimeout(() => {
                       window.removeEventListener('permissionResult', onReturn);
+                      document.removeEventListener('visibilitychange', onVisible);
                       if (!backgroundLocationGranted.current) {
                         setShowBackgroundPermissionModal(true);
                       }
-                    }, 8000);
+                    }, 30000);
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm"
                 >
@@ -2042,26 +2072,39 @@ export default function DriverDashboard() {
                 <button
                   onClick={() => {
                     setShowBackgroundPermissionModal(false);
-
-                    // Opens the app's detail page in Android Settings.
-                    // Driver taps: Permissions → Location → Allow all the time.
-                    // This is the only reliable way to get background location on Android 11+.
                     const bridge = (window as any).AndroidBridge;
-                    bridge?.openLocationSettings?.();
 
-                    // When driver returns from Settings, confirm and save
+                    // openBackgroundLocationSettings() opens ACTION_APPLICATION_DETAILS_SETTINGS
+                    // which is the exact "Location permission" page shown in the screenshot:
+                    // Allow all the time / Allow only while using / Don't allow
+                    if (bridge?.openBackgroundLocationSettings) {
+                      bridge.openBackgroundLocationSettings();
+                    } else {
+                      bridge?.openLocationSettings?.();
+                    }
+
+                    // When driver returns, read live state — only save if actually granted
                     const onReturn = () => {
                       window.removeEventListener('permissionResult', onReturn);
-                      const granted = bridge?.isBackgroundLocationGranted?.() ?? true;
+                      document.removeEventListener('visibilitychange', onVisible);
+                      const granted = bridge?.isBackgroundLocationGranted
+                        ? bridge.isBackgroundLocationGranted()
+                        : false;
                       backgroundLocationGranted.current = granted;
                       if (granted) localStorage.setItem('tuktrack_bg_location_granted', 'true');
                     };
+                    const onVisible = () => {
+                      if (document.visibilityState === 'visible') {
+                        document.removeEventListener('visibilitychange', onVisible);
+                        setTimeout(onReturn, 400);
+                      }
+                    };
                     window.addEventListener('permissionResult', onReturn);
+                    document.addEventListener('visibilitychange', onVisible);
                     setTimeout(() => {
                       window.removeEventListener('permissionResult', onReturn);
-                      backgroundLocationGranted.current = true;
-                      localStorage.setItem('tuktrack_bg_location_granted', 'true');
-                    }, 30000);
+                      document.removeEventListener('visibilitychange', onVisible);
+                    }, 60000);
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/20 uppercase tracking-widest text-sm"
                 >
