@@ -9,6 +9,7 @@ import { I18nextProvider } from 'react-i18next';
 import i18n from './lib/i18n';
 import { Loader2, Shield } from 'lucide-react';
 import { AuthProvider, useAuth } from './features/auth/AuthContext';
+import { useFcmToken } from './hooks/useFcmToken';
 import { InstallProvider } from './features/auth/InstallContext';
 import { SubscriptionGuard } from './components/SubscriptionGuard';
 import { OfflineIndicator } from './components/OfflineIndicator';
@@ -29,8 +30,6 @@ const DailyEarningsPage = lazy(() => import('./features/gestor/dashboard/DailyEa
 const SettingsPage = lazy(() => import('./features/shared/SettingsPage'));
 const TripsHistory = lazy(() => import('./features/driver/dashboard/TripsHistory'));
 const EarningsPage = lazy(() => import('./features/driver/dashboard/EarningsPage'));
-const MessagesPage = lazy(() => import('./features/driver/dashboard/MessagesPage'));
-const ManagerMessagesPage = lazy(() => import('./features/gestor/dashboard/ManagerMessagesPage'));
 const TripsManagement = lazy(() => import('./features/gestor/dashboard/TripsManagement'));
 const SubscriptionSuccess = lazy(() => import('./components/SubscriptionSuccess'));
 const SubscriptionCancel = lazy(() => import('./components/SubscriptionCancel'));
@@ -62,7 +61,6 @@ function ManagerRoutes() {
           <Route path="reports" element={<DashboardLayout role="manager"><ReportsPage /></DashboardLayout>} />
           <Route path="daily-earnings" element={<DashboardLayout role="manager"><DailyEarningsPage /></DashboardLayout>} />
           <Route path="settings" element={<DashboardLayout role="manager"><SettingsPage /></DashboardLayout>} />
-          <Route path="messages" element={<DashboardLayout role="manager"><ManagerMessagesPage /></DashboardLayout>} />
         </Routes>
       </Suspense>
     </SubscriptionGuard>
@@ -70,6 +68,13 @@ function ManagerRoutes() {
 }
 
 const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy'));
+
+/** Registers FCM token inside AuthProvider so useAuth() works */
+function FcmRegistrar() {
+  const { user } = useAuth();
+  useFcmToken(user?.uid);
+  return null;
+}
 
 export default function App() {
   useEffect(() => {
@@ -99,6 +104,7 @@ export default function App() {
         <MotionConfig transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}>
           <AuthProvider>
             <InstallProvider>
+              <FcmRegistrar />
               <OfflineIndicator />
               <PWAInstallPrompt />
               <Router>
@@ -115,7 +121,6 @@ export default function App() {
                     <Route path="/subscription/cancel" element={<SubscriptionCancel />} />
                     <Route path="/driver/dashboard" element={<DashboardLayout role="driver"><DriverDashboard /></DashboardLayout>} />
                     <Route path="/driver/trips" element={<DashboardLayout role="driver"><TripsHistory /></DashboardLayout>} />
-                    <Route path="/driver/messages" element={<DashboardLayout role="driver"><MessagesPage /></DashboardLayout>} />
                     <Route path="/driver/earnings" element={<DashboardLayout role="driver"><EarningsPage /></DashboardLayout>} />
                     <Route path="/driver/settings" element={<DashboardLayout role="driver"><SettingsPage /></DashboardLayout>} />
                     <Route path="*" element={<UnifiedLoginPage />} />
