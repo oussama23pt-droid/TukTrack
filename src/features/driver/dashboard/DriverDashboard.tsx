@@ -104,6 +104,9 @@ export default function DriverDashboard() {
   const backgroundLocationGranted = React.useRef<boolean>(localStorage.getItem('tuktrack_bg_location_granted') === 'true');
   const [showShiftStartModal, setShowShiftStartModal] = useState(false);
   const prevActiveShiftRef = React.useRef<any>(null);
+  // Cancel trip with reason modal
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
 
 
   // Fetch manager info
@@ -629,20 +632,51 @@ export default function DriverDashboard() {
     setCancelTimer(20);
   };
 
-  const handleCancelTrip = async () => {
+  const handleCancelTrip = () => {
+    // Open cancel reason modal instead of directly cancelling
+    setCancelReason('');
+    setShowCancelModal(true);
+  };
+
+  const confirmCancelTrip = async () => {
     if (!user || !activeTrip) return;
+    if (!cancelReason.trim()) {
+      alert('Por favor escreve o motivo do cancelamento.');
+      return;
+    }
     setIsActionLoading(true);
+    setShowCancelModal(false);
     try {
       await updateDoc(doc(db, 'trips', activeTrip.id), {
-        status: 'cancelled'
+        status: 'cancelled',
+        cancelReason: cancelReason.trim(),
+        cancelledAt: new Date().toISOString()
       });
       await updateDoc(doc(db, 'users', user.uid), {
         activeTripId: '',
         isOnline: true
       });
+      // Notify manager of cancellation
+      if (userData?.managerId) {
+        try {
+          const { addDoc, collection: col } = await import('firebase/firestore');
+          await addDoc(col(db, 'notifications'), {
+            managerId: userData.managerId,
+            type: 'trip_cancelled',
+            title: '🚫 Viagem Cancelada',
+            message: `O motorista ${userData.name} cancelou a viagem. Motivo: ${cancelReason.trim()}`,
+            driverUid: user.uid,
+            driverName: userData.name,
+            tripId: activeTrip.id,
+            createdAt: new Date().toISOString(),
+            read: false,
+            isForDrivers: false
+          });
+        } catch (_) {}
+      }
       setLocalActiveTripId(null);
       setActiveTrip(null);
-      alert('Viagem Cancelada.');
+      setCancelReason('');
     } catch (err: any) {
       handleFirestoreError(err, 'update', `trips/${activeTrip.id}`);
     } finally {
@@ -1191,7 +1225,7 @@ export default function DriverDashboard() {
   const showOnlineNotification = async (shiftStartTime?: Date) => {
     const shiftStartMs = shiftStartTime ? shiftStartTime.getTime() : Date.now();
     const title   = '🟢 TukTrack — Em Serviço';
-    const message = 'A partilhar localização em tempo real. Toque para abrir.';
+    const message = '● LIVE  •  A partilhar localização em tempo real. Toque para abrir.';
 
     const tryShow = (attemptsLeft: number) => {
       const bridge = (window as any).AndroidBridge;
@@ -1882,27 +1916,39 @@ export default function DriverDashboard() {
                     overlayPermissionGranted.current = true;
                     localStorage.setItem('tuktrack_overlay_granted', 'true');
 
-                    // Open Android "Appear on top" settings via Capacitor Plugins
-                    // No import needed — Capacitor injects plugins at runtime
+                    // Use AndroidBridge to open exact overlay settings page for TukTrack
+                    // This goes directly to the "Appear on top" toggle for TukTrack
                     try {
-                      const NativeSettings = (window as any)?.Capacitor?.Plugins?.NativeSettings;
-                      if (NativeSettings?.openAndroid) {
-                        await NativeSettings.openAndroid({ option: 'appDrawOverlays' });
+                      const bridge = (window as any).AndroidBridge;
+                      if (bridge?.openOverlaySettings) {
+                        bridge.openOverlaySettings(); // opens package-specific overlay settings
                       } else {
-                        // Fallback: open app details in Android settings
-                        const AppLauncher = (window as any)?.Capacitor?.Plugins?.AppLauncher;
-                        await AppLauncher?.openUrl({ url: 'android.settings.action.MANAGE_OVERLAY_PERMISSION' });
+                        // Capacitor fallback
+                        const NativeSettings = (window as any)?.Capacitor?.Plugins?.NativeSettings;
+                        if (NativeSettings?.openAndroid) {
+                          await NativeSettings.openAndroid({ option: 'appDrawOverlays' });
+                        }
                       }
                     } catch (e) {
                       console.warn('Could not open overlay settings:', e);
                     }
 
-                    // Show background location modal after driver returns
-                    setTimeout(() => {
-                      if (!backgroundLocationGranted.current) {
-                        setShowBackgroundPermissionModal(true);
-                      }
-                    }, 2000);
+                    // When driver returns, check if granted and show location modal
+                    const checkAndNext = () => {
+                      setTimeout(() => {
+                        if (!backgroundLocationGranted.current) {
+                          setShowBackgroundPermissionModal(true);
+                        }
+                      }, 1500);
+                    };
+                    // Listen for app resume
+                    const handleResume = () => {
+                      document.removeEventListener('visibilitychange', handleResume);
+                      checkAndNext();
+                    };
+                    document.addEventListener('visibilitychange', handleResume);
+                    // Fallback timer
+                    setTimeout(checkAndNext, 4000);
                   }}
                   className="w-full h-14 bg-amber text-navy font-black rounded-2xl shadow-lg shadow-amber/30 uppercase tracking-widest text-sm"
                 >
@@ -1958,17 +2004,22 @@ export default function DriverDashboard() {
                     backgroundLocationGranted.current = true;
                     localStorage.setItem('tuktrack_bg_location_granted', 'true');
 
-                    // Open app Location permission page in Android settings
-                    // Driver sees "Allow all the time" option directly
+                    // Use AndroidBridge to open TukTrack location permission settings directly
+                    // Driver lands on the "Allow all the time" screen immediately
                     try {
-                      const NativeSettings = (window as any)?.Capacitor?.Plugins?.NativeSettings;
-                      if (NativeSettings?.openAndroid) {
-                        await NativeSettings.openAndroid({ option: 'applicationDetails' });
+                      const bridge = (window as any).AndroidBridge;
+                      if (bridge?.openLocationSettings) {
+                        bridge.openLocationSettings(); // opens app-specific location permission page
                       } else {
-                        // Fallback: BGGeo openSettings goes to location permission page
+                        // Capacitor BGGeo fallback
                         const BGGeo = (window as any)?.Capacitor?.Plugins?.BackgroundGeolocation;
                         if (BGGeo?.openSettings) {
                           await BGGeo.openSettings();
+                        } else {
+                          const NativeSettings = (window as any)?.Capacitor?.Plugins?.NativeSettings;
+                          if (NativeSettings?.openAndroid) {
+                            await NativeSettings.openAndroid({ option: 'applicationDetails' });
+                          }
                         }
                       }
                     } catch (e) {
@@ -2046,6 +2097,58 @@ export default function DriverDashboard() {
           <span className="text-[10px] font-black uppercase tracking-widest opacity-40">TukTrack Security • ID: {userData.managerId}</span>
         </div>
       )}
+
+      {/* Cancel Trip Reason Modal */}
+      <AnimatePresence>
+        {showCancelModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[400] flex items-center justify-center bg-black/60 backdrop-blur-sm px-6"
+          >
+            <motion.div
+              initial={{ scale: 0.85, opacity: 0, y: 40 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.85, opacity: 0, y: 40 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl"
+            >
+              <div className="flex flex-col items-center text-center space-y-4">
+                <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center text-red-500">
+                  <AlertTriangle size={32} />
+                </div>
+                <h2 className="text-2xl font-black text-navy">Cancelar Viagem</h2>
+                <p className="text-sm text-slate-500 font-medium">
+                  Por favor indica o motivo do cancelamento. Esta informação será enviada ao gestor.
+                </p>
+                <textarea
+                  className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 text-slate-800 focus:border-amber focus:bg-white transition-all outline-none min-h-[100px] resize-none font-medium text-sm"
+                  placeholder="Escreve o motivo aqui..."
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  autoFocus
+                />
+                <div className="flex flex-col w-full space-y-3 pt-2">
+                  <button
+                    onClick={confirmCancelTrip}
+                    disabled={!cancelReason.trim() || isActionLoading}
+                    className="w-full h-14 bg-red-500 text-white font-black rounded-2xl shadow-lg uppercase tracking-widest text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isActionLoading ? 'A cancelar...' : 'Confirmar Cancelamento'}
+                  </button>
+                  <button
+                    onClick={() => { setShowCancelModal(false); setCancelReason(''); }}
+                    className="w-full h-11 text-slate-400 font-bold text-sm"
+                  >
+                    Voltar
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
