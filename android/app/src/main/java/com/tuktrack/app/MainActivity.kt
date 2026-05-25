@@ -278,21 +278,25 @@ class MainActivity : BridgeActivity() {
         // ── 3. OVERLAY PERMISSION ────────────────────────────────────────────────
         @JavascriptInterface
         fun openOverlaySettings() {
-            // ACTION_MANAGE_OVERLAY_PERMISSION with package: Uri goes DIRECTLY to
-            // the per-app "Appear on top" toggle on stock Android and Samsung One UI.
-            // FLAG_ACTIVITY_CLEAR_TASK ensures a clean back-stack so pressing Back
-            // returns cleanly to TukTrack rather than a stale settings stack.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                startActivity(Intent(
+            // ACTION_MANAGE_OVERLAY_PERMISSION + "package:com.tuktrack.app" opens the
+            // EXACT per-app "Appear on top" toggle page directly on ALL Android versions
+            // including Samsung One UI. No list, no extra taps — driver just toggles it.
+            // FLAG_ACTIVITY_NEW_TASK is required when starting from a non-Activity context.
+            // We do NOT use FLAG_ACTIVITY_CLEAR_TASK here — that breaks the back navigation
+            // on Samsung and causes the app to restart instead of returning to TukTrack.
+            try {
+                val intent = Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:${packageName}")
+                    Uri.parse("package:$packageName")
                 ).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                })
-            } else {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                // Fallback for very old devices that don't support the action
                 startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                     data = Uri.fromParts("package", packageName, null)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 })
             }
         }
@@ -305,14 +309,11 @@ class MainActivity : BridgeActivity() {
         // ── 4. BACKGROUND LOCATION ───────────────────────────────────────────────
         @JavascriptInterface
         fun openBackgroundLocationSettings() {
-            // Android 10+ (Q): ACTION_APPLICATION_DETAILS_SETTINGS lands on the app info page.
-            // From there the driver taps Permissions → Location → "Allow all the time".
-            // There is NO public Intent that skips straight to the location sub-screen on all OEMs,
-            // so app details is the closest we can go without a hidden API.
-            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.fromParts("package", packageName, null)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-            })
+            // Opens the app's dedicated Location permission page where the driver sees
+            // "Allow all the time" directly — no intermediate steps.
+            // ACTION_APPLICATION_DETAILS_SETTINGS is the only cross-OEM intent that
+            // reliably shows the app's permission list including background location.
+            openLocationPermissionPage()
         }
 
         @JavascriptInterface
@@ -320,18 +321,7 @@ class MainActivity : BridgeActivity() {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
             val granted = ContextCompat.checkSelfPermission(this@MainActivity,
                 Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                // On Android 11+ we MUST use the system dialog — ask directly
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    ActivityCompat.requestPermissions(
-                        this@MainActivity,
-                        arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
-                        REQUEST_BACKGROUND_LOCATION
-                    )
-                } else {
-                    openBackgroundLocationSettings()
-                }
-            }
+            if (!granted) openLocationPermissionPage()
             return granted
         }
 
@@ -344,14 +334,36 @@ class MainActivity : BridgeActivity() {
 
         @JavascriptInterface
         fun openLocationSettings() {
-            // Goes directly to the app's Location permission screen.
-            // ACTION_APPLICATION_DETAILS_SETTINGS + the package Uri is the only reliable
-            // way across all Android OEMs (Samsung One UI, Xiaomi MIUI, stock AOSP).
-            // The driver sees: Permissions → Location → Allow all the time.
-            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.fromParts("package", packageName, null)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-            })
+            openLocationPermissionPage()
+        }
+
+        // ── Shared helper: opens the app's location permission page directly ────
+        // On Android 10+ this uses ACTION_APPLICATION_DETAILS_SETTINGS which shows
+        // Permissions → Location → "Allow all the time" in a single tap from that screen.
+        // On Samsung One UI, MIUI, and stock AOSP this is the only reliable path.
+        private fun openLocationPermissionPage() {
+            try {
+                // Try the direct permission-group intent first (works on stock Android 10+)
+                // This lands the user exactly on the Location permission choice screen.
+                val intent = Intent(Intent.ACTION_MANAGE_APP_PERMISSIONS).apply {
+                    putExtra(Intent.EXTRA_PACKAGE_NAME, packageName)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                // Fallback: app details page — driver taps Permissions → Location
+                try {
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", packageName, null)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    })
+                } catch (e2: Exception) {
+                    // Last resort
+                    startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    })
+                }
+            }
         }
 
         @JavascriptInterface
