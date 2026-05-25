@@ -201,20 +201,36 @@ class MainActivity : BridgeActivity() {
         // ── Settings shortcuts ────────────────────────────────────────────────
         @JavascriptInterface
         fun openLocationSettings() {
-            // On Android 11+ jump directly to the location permission page
-            // so the user sees "Allow all the time" / "Allow only while using" etc.
+            // Strategy 1 (Android 11+ / API 30+):
+            // Jump directly to the Location permission page for this app,
+            // which shows "Allow all the time / Allow only while using / Ask every time / Don't allow".
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    val intent = Intent(Intent.ACTION_MANAGE_APP_PERMISSIONS).apply {
+                        putExtra(Intent.EXTRA_PACKAGE_NAME, packageName)
+                        putExtra("android.intent.extra.PERMISSION_GROUP_NAME",
+                            android.Manifest.permission_group.LOCATION)
+                    }
+                    startActivity(intent)
+                    return
+                } catch (_: Exception) { /* fall through to next strategy */ }
+            }
+
+            // Strategy 2 (Android 6–10 / API 23–29):
+            // Use the undocumented but widely supported permission group intent.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 try {
                     val intent = Intent("android.intent.action.MANAGE_APP_PERMISSION").apply {
                         putExtra("android.intent.extra.PACKAGE_NAME", packageName)
                         putExtra("android.intent.extra.PERMISSION_GROUP_NAME",
-                            "android.permission-group.LOCATION")
+                            android.Manifest.permission_group.LOCATION)
                     }
                     startActivity(intent)
                     return
-                } catch (_: Exception) { /* fall through */ }
+                } catch (_: Exception) { /* fall through to final fallback */ }
             }
-            // Fallback: open the general app details page
+
+            // Strategy 3 — final fallback: open the general app details page.
             startActivity(
                 Intent(
                     Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
