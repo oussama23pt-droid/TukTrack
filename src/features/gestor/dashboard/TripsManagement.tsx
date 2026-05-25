@@ -237,7 +237,7 @@ export default function TripsManagement() {
 
       autoTable(doc, {
         startY: 55,
-        head: [['ID', 'Data', 'Motorista', 'Rota', 'Pass', 'Duração', 'Valor']],
+        head: [['ID', 'Data', 'Motorista', 'Rota', 'Pass', 'Duração', 'Valor/Estado']],
         body: filteredTrips.map(t => [
           t.id.slice(0, 8),
           new Date(t.createdAt).toLocaleDateString('pt-PT'),
@@ -245,13 +245,15 @@ export default function TripsManagement() {
           t.description || 'Rota Manual',
           (t.passengers || 0).toString(),
           `${t.duration || 0} min`,
-          `${(t.amount || 0).toFixed(2)}€`
+          t.status === 'cancelled'
+            ? `Cancelado${t.cancelReason ? ` — ${t.cancelReason.substring(0, 40)}` : ''}`
+            : `${(t.amount || 0).toFixed(2)}€`
         ]),
         theme: 'striped',
         headStyles: { fillColor: [30, 41, 59] },
       });
 
-      const totalRevenue = filteredTrips.reduce((acc, t) => acc + (t.amount || 0), 0);
+      const totalRevenue = filteredTrips.filter(t => t.status !== 'cancelled').reduce((acc, t) => acc + (t.amount || 0), 0);
       doc.setFontSize(14);
       doc.setTextColor(30, 41, 59);
       doc.text(`Total de Viagens: ${filteredTrips.length}`, 14, (doc as any).lastAutoTable.finalY + 15);
@@ -479,7 +481,18 @@ if ((window as any).median) {
                     <div className="text-right flex items-center justify-end space-x-4">
                       <div className="text-right">
                         <p className="text-[8px] md:text-[9px] text-slate-400 font-black uppercase tracking-widest mb-1 md:mb-0.5">Receita</p>
-                        <p className="text-xl md:text-2xl font-black text-navy group-hover:text-amber transition-colors">{trip.amount?.toFixed(2)}<span className="text-[10px] ml-0.5 opacity-40">€</span></p>
+                        {trip.status === 'cancelled' ? (
+                          <div className="flex flex-col items-end">
+                            <span className="text-base font-black text-red-500">🚫 Cancelado</span>
+                            {trip.cancelReason && (
+                              <span className="text-[9px] text-red-400 font-medium max-w-[120px] text-right leading-tight mt-0.5 italic">
+                                {trip.cancelReason.substring(0, 50)}{trip.cancelReason.length > 50 ? '…' : ''}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-xl md:text-2xl font-black text-navy group-hover:text-amber transition-colors">{trip.amount?.toFixed(2)}<span className="text-[10px] ml-0.5 opacity-40">€</span></p>
+                        )}
                       </div>
                       <div className="p-2.5 bg-slate-50 rounded-xl text-slate-300 group-hover:bg-amber/10 group-hover:text-amber transition-all hidden md:block">
                         <MapPin size={18} />
