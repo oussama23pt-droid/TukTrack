@@ -1,8 +1,14 @@
+import crypto from 'node:crypto';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { defineConfig, loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+
+// Polyfill crypto for Node 18 / serialize-javascript / Rollup
+if (!globalThis.crypto) {
+  (globalThis as any).crypto = crypto.webcrypto;
+}
 
 const _filename = fileURLToPath(import.meta.url || 'file:///');
 const _dirname = path.dirname(_filename);
@@ -77,16 +83,7 @@ export default defineConfig(({ mode }) => {
       }),
     ],
     build: {
-      rollupOptions: {
-        plugins: [
-          {
-            name: 'crypto-polyfill',
-            banner() {
-              return `import { webcrypto } from 'node:crypto'; if (typeof globalThis.crypto === 'undefined') { globalThis.crypto = webcrypto; }`;
-            },
-          },
-        ],
-      },
+      rollupOptions: {},
     },
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
