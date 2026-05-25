@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Home, Users, Map as MapIcon, BarChart, Settings, LogOut, Shield, Briefcase, Activity, CreditCard, Menu, X, Lock, Timer as TimerIcon, Download, MessageCircle } from 'lucide-react';
+import { Home, Users, Map as MapIcon, BarChart, Settings, LogOut, Shield, Briefcase, Activity, CreditCard, Menu, X, Lock, Timer as TimerIcon, Download } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { cn } from '../lib/utils';
 import { useAuth } from '../features/auth/AuthContext';
@@ -90,7 +90,6 @@ export default function DashboardLayout({ children, role }: { children: React.Re
   const navItems = role === 'manager' ? [
     { icon: Lock, label: t('reservations'), path: '#', comingSoon: true },
     { icon: Home, label: t('dashboard'), path: '/manager/dashboard' },
-    { icon: MessageCircle, label: 'Mensagens', path: '/manager/messages' },
     { icon: Shield, label: t('vehicles'), path: '/manager/vehicles' },
     { icon: Users, label: t('drivers'), path: '/manager/drivers' },
     { icon: Activity, label: t('trips_routes'), path: '/manager/trips' },
@@ -102,7 +101,6 @@ export default function DashboardLayout({ children, role }: { children: React.Re
     { icon: Home, label: t('home'), path: '/driver/dashboard' },
     { icon: MapIcon, label: t('trips_routes'), path: '/driver/trips' },
     { icon: BarChart, label: t('earnings'), path: '/driver/earnings' },
-    { icon: MessageCircle, label: 'Mensagens', path: '/driver/messages' },
     { icon: Settings, label: t('settings'), path: '/driver/settings' },
   ];
 
