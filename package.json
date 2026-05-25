@@ -17,7 +17,6 @@
     "@capacitor/core": "^6.0.0",
     "@capacitor/local-notifications": "^6.0.0",
     "@google/genai": "^1.29.0",
-    "@tailwindcss/vite": "^3.4.0",
     "@types/mapbox-gl": "^3.4.1",
     "@vitejs/plugin-react": "^5.0.4",
     "clsx": "^2.1.1",
