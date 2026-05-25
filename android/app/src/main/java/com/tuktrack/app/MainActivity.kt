@@ -278,8 +278,19 @@ class MainActivity : BridgeActivity() {
         // ── 3. OVERLAY PERMISSION ────────────────────────────────────────────────
         @JavascriptInterface
         fun openOverlaySettings() {
-            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:${packageName}")))
+            // Opens DIRECTLY to TukTrack's "Appear on top" toggle — driver just enables it
+            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:${packageName}")
+                )
+            } else {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:${packageName}")
+                }
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
         }
 
         @JavascriptInterface
@@ -314,8 +325,20 @@ class MainActivity : BridgeActivity() {
 
         @JavascriptInterface
         fun openLocationSettings() {
-            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:${packageName}")))
+            // Opens the app-specific location permission page where driver selects "Allow all the time"
+            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10+: can go directly to location permission screen
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            } else {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:${packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+            startActivity(intent)
         }
 
         @JavascriptInterface
