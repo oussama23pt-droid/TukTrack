@@ -274,12 +274,13 @@ class LocationForegroundService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🟢 TukTrack — Em Serviço  •  $timer")
-            .setContentText("A partilhar localização em tempo real. Toque para abrir.")
+            .setContentText("● LIVE  •  GPS activo. Localização a ser partilhada em tempo real.")
             .setSmallIcon(R.drawable.ic_stat_icon)
-            .setColor(0xFF10B981.toInt())
+            .setColor(0xFF10B981.toInt())   // green dot accent
+            .setColorized(true)              // colorize background on expanded view
             .setContentIntent(tapIntent)
-            .setOngoing(true)           // non-dismissable
-            .setSilent(true)            // no sound/vibration
+            .setOngoing(true)               // NON-DISMISSABLE while driver is online
+            .setSilent(true)                // no sound/vibration
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
