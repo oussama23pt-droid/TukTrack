@@ -1474,6 +1474,20 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
           setIsSubmitting(false);
           return;
         }
+
+        // Write drivers_init so the driver can log in immediately.
+        // This is the lookup table the login flow uses to find the driver's profile.
+        try {
+          await setDoc(doc(db, 'drivers_init', cleanEmail), {
+            ...driverData,
+            uid: realUid,
+            id: realUid,
+          });
+        } catch (err: any) {
+          // Not fatal — the users/{uid} doc is the source of truth.
+          // drivers_init is just a convenience index.
+          console.warn('drivers_init write failed (non-fatal):', err?.message);
+        }
       }
       onClose();
     } catch (err: any) {
