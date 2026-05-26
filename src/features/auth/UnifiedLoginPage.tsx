@@ -131,8 +131,8 @@ export default function UnifiedLoginPage() {
             }
 
             // Second: check users collection for unactivated drivers.
-            // FIXED: Single where('email') clause — no composite Firestore index needed.
-            // All role/uid filtering is done in JavaScript after the fetch.
+            // FIXED: Single where('email') only — zero composite indexes needed.
+            // role + uid checks happen in JS after the fetch.
             if (!driverData) {
               try {
                 const usersSnap = await getDocs(
@@ -160,7 +160,6 @@ export default function UnifiedLoginPage() {
                     throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
                   }
                 } else if (anyDriverDocs.length > 0) {
-                  // Driver exists but already activated — must be wrong PIN
                   throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
                 } else {
                   throw new Error('Conta nao encontrada. Verifique o email com o seu gestor.');
