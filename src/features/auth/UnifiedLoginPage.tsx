@@ -77,8 +77,14 @@ export default function UnifiedLoginPage() {
           authErr.code === 'auth/user-not-found' || 
           authErr.code === 'auth/wrong-password';
 
-        // AUTO-PROVISION DEMO ACCOUNTS
-        if ((cleanEmail === 'motorista@test.com' || cleanEmail === 'gestor@test.com') && password === '123456') {
+        // AUTO-PROVISION DEMO ACCOUNTS (including custom demo accounts)
+        const isDemoAccount = (
+          cleanEmail === 'motorista@test.com' || 
+          cleanEmail === 'gestor@test.com' ||
+          cleanEmail === 'demo-driver@tuktrack.com' ||
+          cleanEmail === 'demo-manager@tuktrack.com'
+        );
+        if (isDemoAccount && (password === '123456' || password === 'Demo1234' || password === 'demo1234')) {
           try {
             // If sign in failed with wrong password for a demo account, it means someone changed it manually 
             // in Auth console, but we'll try to re-create or catch it.
@@ -119,16 +125,39 @@ export default function UnifiedLoginPage() {
           let driverData = null;
           
           if (isInvalidCred) {
+            // Check drivers_init first (pre-registered drivers)
             try {
               const initDoc = await getDoc(doc(db, 'drivers_init', cleanEmail));
               if (initDoc.exists()) {
                 const iData = initDoc.data();
-                if (iData.pin && (String(iData.pin) === password)) {
+                if (iData.pin && (String(iData.pin) === String(password))) {
                   driverData = iData;
                 }
               }
             } catch (initErr) {
               console.error("Drivers init lookup failed:", initErr);
+            }
+
+            // Also check users collection directly (drivers created by manager)
+            // These have uid:'' because Firebase Auth account doesn't exist yet
+            if (!driverData) {
+              try {
+                const usersQuery = query(
+                  collection(db, 'users'),
+                  where('email', '==', cleanEmail),
+                  where('role', '==', 'driver')
+                );
+                const usersSnap = await getDocs(usersQuery);
+                if (!usersSnap.empty) {
+                  const uData = usersSnap.docs[0].data();
+                  // Match by PIN (primary) or allow if no Firebase Auth account exists
+                  if (uData.pin && (String(uData.pin) === String(password))) {
+                    driverData = { ...uData, id: usersSnap.docs[0].id };
+                  }
+                }
+              } catch (usersErr) {
+                console.error("Users collection lookup failed:", usersErr);
+              }
             }
           }
 
