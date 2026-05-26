@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Users, Search, Plus, Phone, Mail, MapPin, CheckCircle2, X, Shield, Palette, Settings, Trash2, Edit2, Briefcase, CreditCard, ChevronRight, Activity, Lock, Clock, Timer, Loader2, ExternalLink, Trophy } from 'lucide-react';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc, addDoc, getDoc, getDocs } from 'firebase/firestore';
-import { db } from '../../../lib/firebase';
+import { db, auth } from '../../../lib/firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { handleFirestoreError, sanitizeData } from '../../../lib/firestore-utils';
 import { useAuth } from '../../auth/AuthContext';
 import { cn } from '../../../lib/utils';
@@ -1416,10 +1417,27 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
           throw err;
         }
 
-        const newDriverRef = doc(collection(db, 'users'));
+        // Create Firebase Auth account immediately using PIN as password.
+        // This means the driver can log in with signInWithEmailAndPassword directly —
+        // no drivers_init collection needed, no quota issues, no silent failures.
+        let newUid: string;
+        try {
+          const credential = await createUserWithEmailAndPassword(auth, cleanEmail, finalPin);
+          newUid = credential.user.uid;
+        } catch (err: any) {
+          if (err.code === 'auth/email-already-in-use') {
+            alert('Este e-mail já tem uma conta de autenticação. Use um e-mail diferente.');
+          } else {
+            alert('Erro ao criar conta: ' + (err?.message || err));
+          }
+          setIsSubmitting(false);
+          return;
+        }
+
+        // Write the full Firestore profile with the real UID from the start.
         const driverData = sanitizeData({
-          id: newDriverRef.id,
-          uid: '', 
+          id: newUid,
+          uid: newUid,
           managerId,
           name: name.trim(),
           email: cleanEmail,
@@ -1430,28 +1448,11 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
           isOnline: false,
           createdAt: new Date().toISOString()
         });
-        
-        try {
-          await setDoc(newDriverRef, driverData);
-        } catch (err) {
-          handleFirestoreError(err, 'create', `users/${newDriverRef.id}`);
-          return;
-        }
 
-        // CRITICAL: write to drivers_init — without this the driver CANNOT login
         try {
-          await setDoc(doc(db, 'drivers_init', cleanEmail), {
-            ...driverData,
-            id: newDriverRef.id,
-            managerId,
-            pin: finalPin,
-          });
-        } catch (err: any) {
-          // drivers_init write failed — roll back users doc so no broken account exists
-          console.error('drivers_init write failed:', err);
-          try { await deleteDoc(newDriverRef); } catch (_) {}
-          alert('Erro ao registar motorista: ' + (err?.message || err) + '\nTente novamente.');
-          setIsSubmitting(false);
+          await setDoc(doc(db, 'users', newUid), driverData);
+        } catch (err) {
+          handleFirestoreError(err, 'create', `users/${newUid}`);
           return;
         }
       }
