@@ -115,10 +115,11 @@ export default function UnifiedLoginPage() {
             throw demoErr;
           }
         } else {
-          // 2. Driver PIN login — check drivers_init collection
+          // 2. Driver PIN login — check drivers_init first, then users collection
           let driverData = null;
 
           if (isInvalidCred) {
+            // First: check drivers_init (document ID = email)
             try {
               const initDoc = await getDoc(doc(db, 'drivers_init', cleanEmail));
               if (initDoc.exists()) {
@@ -130,14 +131,43 @@ export default function UnifiedLoginPage() {
                 } else {
                   throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
                 }
-              } else {
-                throw new Error('Conta nao encontrada. Verifique o email com o seu gestor ou se ja fez login antes.');
               }
             } catch (initErr: any) {
-              if (initErr.message?.includes('PIN') || initErr.message?.includes('nao encontrada')) {
-                throw initErr;
-              }
+              if (initErr.message?.includes('PIN')) throw initErr;
               console.error('drivers_init lookup failed:', initErr);
+            }
+
+            // Second: check users collection for drivers with uid="" (not yet activated)
+            if (!driverData) {
+              try {
+                const usersSnap = await getDocs(
+                  query(
+                    collection(db, 'users'),
+                    where('email', '==', cleanEmail),
+                    where('role', '==', 'driver'),
+                    where('uid', '==', '')
+                  )
+                );
+                if (!usersSnap.empty) {
+                  const uData = usersSnap.docs[0].data();
+                  const docId = usersSnap.docs[0].id;
+                  const storedPin = String(uData.pin || '').trim();
+                  const enteredPin = String(password || '').trim();
+                  if (storedPin === enteredPin) {
+                    driverData = { ...uData, id: docId };
+                  } else {
+                    throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
+                  }
+                } else {
+                  throw new Error('Conta nao encontrada. Verifique o email com o seu gestor.');
+                }
+              } catch (usersErr: any) {
+                if (usersErr.message?.includes('PIN') || usersErr.message?.includes('nao encontrada')) {
+                  throw usersErr;
+                }
+                console.error('users lookup failed:', usersErr);
+                throw new Error('Erro de ligacao. Tente novamente.');
+              }
             }
           }
 
