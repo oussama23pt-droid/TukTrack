@@ -354,6 +354,7 @@ export default function DriversManagement({ initialTab, hideTabs = false }: { in
       </AnimatePresence>
 
       <UpsertDriverModal 
+        key={editingDriver ? editingDriver.id : (isAddDriverOpen ? 'new-driver' : 'closed')}
         isOpen={isAddDriverOpen || !!editingDriver} 
         onClose={() => {
           setIsAddDriverOpen(false);
@@ -1301,26 +1302,40 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    // Always reset all fields when the modal opens or switches between add/edit mode.
+    // The 'key' prop on the parent already forces a full remount on each open,
+    // but this guard ensures state is correct even without a remount.
     if (initialData) {
       setName(initialData.name || '');
       setPhone(initialData.phoneNumber || '');
       setEmail(initialData.email || '');
       setPin(initialData.pin || '');
     } else {
+      // New driver — always start with blank fields and a fresh auto-generated PIN
       setName('');
       setPhone('');
       setEmail('');
-      // Auto-generate a 6-digit PIN for new drivers
       setPin(Math.floor(100000 + Math.random() * 900000).toString());
     }
-  }, [initialData, isOpen]);
+  }, [isOpen]);  // depend only on isOpen so we reset every time the modal opens
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Guard: ensure required fields are filled before saving
+    if (!name.trim()) {
+      alert('Por favor, insira o nome completo do motorista.');
+      return;
+    }
+    if (!email.trim()) {
+      alert('Por favor, insira o email do motorista.');
+      return;
+    }
     if (!initialData && pin.length !== 6) {
       alert('O PIN deve ter exatamente 6 algarismos.');
       return;
     }
+
     const cleanEmail = email.trim().toLowerCase();
     const cleanPhone = phone.trim();
     const finalPin = (pin || '').toString().trim() || (initialData?.pin || '').toString();
