@@ -59,7 +59,7 @@ service cloud.firestore {
     }
 
     match /drivers_init/{email} {
-      allow get: if true; 
+      allow get, list: if true;  // Allow unauthenticated reads for driver login
       allow create: if isManager();
       allow update, delete: if isSignedIn() && (
         existing().managerId == authUid() ||
