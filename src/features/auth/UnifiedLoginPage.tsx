@@ -120,13 +120,12 @@ export default function UnifiedLoginPage() {
 
       const loggedUser = userCredential.user;
       
-      // Check user profile
+      // Check user profile in Firestore
       const userDoc = await getDoc(doc(db, 'users', loggedUser.uid));
       
       if (userDoc.exists()) {
         const uData = userDoc.data();
         const role = uData.role;
-        
         if (role === 'manager') {
           navigate('/manager/dashboard');
         } else if (role === 'driver') {
@@ -135,8 +134,29 @@ export default function UnifiedLoginPage() {
           setError('Função de utilizador não reconhecida.');
         }
       } else {
-        // New user or migration required
-        navigate('/register/select');
+        // Profile missing from users/{uid} — check drivers_init by email
+        // This handles the case where the manager created the driver but the
+        // Firestore write to users/{uid} failed, or the uid field is wrong.
+        const driverInitDoc = await getDoc(doc(db, 'drivers_init', cleanEmail));
+        if (driverInitDoc.exists()) {
+          const initData = driverInitDoc.data();
+          // Reconstruct the users/{uid} doc with the correct uid
+          const reconstructed = {
+            ...initData,
+            id: loggedUser.uid,
+            uid: loggedUser.uid,
+          };
+          await setDoc(doc(db, 'users', loggedUser.uid), reconstructed, { merge: true });
+          // Also update drivers_init with the correct uid
+          await setDoc(doc(db, 'drivers_init', cleanEmail), {
+            uid: loggedUser.uid,
+            id: loggedUser.uid,
+          }, { merge: true });
+          navigate('/driver/dashboard');
+        } else {
+          // No profile found anywhere — send to registration
+          navigate('/register/select');
+        }
       }
     } catch (err: any) {
       console.error('Login error:', err);
