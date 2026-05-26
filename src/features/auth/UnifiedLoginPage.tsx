@@ -40,6 +40,7 @@ export default function UnifiedLoginPage() {
       setLoginMode('manager');
     }
   }, [location.pathname]);
+
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [legalModal, setLegalModal] = useState<{ open: boolean; type: 'terms' | 'privacy' }>({
@@ -80,8 +81,6 @@ export default function UnifiedLoginPage() {
         // AUTO-PROVISION DEMO ACCOUNTS
         if ((cleanEmail === 'motorista@test.com' || cleanEmail === 'gestor@test.com') && password === '123456') {
           try {
-            // If sign in failed with wrong password for a demo account, it means someone changed it manually 
-            // in Auth console, but we'll try to re-create or catch it.
             if (authErr.code === 'auth/wrong-password') {
                throw new Error('A palavra-passe da conta de demonstração foi alterada.');
             }
@@ -90,7 +89,6 @@ export default function UnifiedLoginPage() {
             const newUser = userCredential.user;
             const isDriver = cleanEmail === 'motorista@test.com';
 
-            // Create Demo Profile with proper status
             await setDoc(doc(db, 'users', newUser.uid), {
               id: newUser.uid,
               uid: newUser.uid,
@@ -101,11 +99,6 @@ export default function UnifiedLoginPage() {
               status: 'active',
               createdAt: new Date().toISOString()
             });
-
-            // Demo manager setup (if needed, but usually we just need the drivers to point to a manager)
-            if (!isDriver) {
-               // We don't need a separate fleets collection anymore
-            }
 
           } catch (demoErr: any) {
             console.error("Demo Provisioning Error:", demoErr);
@@ -137,20 +130,28 @@ export default function UnifiedLoginPage() {
               console.error('drivers_init lookup failed:', initErr);
             }
 
-            // Second: check users collection for drivers with uid="" (not yet activated)
+            // Second: check users collection for drivers not yet activated
+            // FIX: Only filter by email + role to avoid needing a composite Firestore index.
+            // We then check uid in-memory to find unactivated accounts (uid === '').
             if (!driverData) {
               try {
                 const usersSnap = await getDocs(
                   query(
                     collection(db, 'users'),
                     where('email', '==', cleanEmail),
-                    where('role', '==', 'driver'),
-                    where('uid', '==', '')
+                    where('role', '==', 'driver')
                   )
                 );
-                if (!usersSnap.empty) {
-                  const uData = usersSnap.docs[0].data();
-                  const docId = usersSnap.docs[0].id;
+
+                // Filter in-memory for unactivated drivers (uid is empty or missing)
+                const unactivatedDocs = usersSnap.docs.filter(d => {
+                  const uid = d.data().uid;
+                  return !uid || uid === '';
+                });
+
+                if (unactivatedDocs.length > 0) {
+                  const uData = unactivatedDocs[0].data();
+                  const docId = unactivatedDocs[0].id;
                   const storedPin = String(uData.pin || '').trim();
                   const enteredPin = String(password || '').trim();
                   if (storedPin === enteredPin) {
@@ -158,6 +159,9 @@ export default function UnifiedLoginPage() {
                   } else {
                     throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
                   }
+                } else if (!usersSnap.empty) {
+                  // Account exists but already activated — wrong PIN
+                  throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
                 } else {
                   throw new Error('Conta nao encontrada. Verifique o email com o seu gestor.');
                 }
@@ -171,14 +175,12 @@ export default function UnifiedLoginPage() {
             }
           }
 
-                    if (driverData) {
+          if (driverData) {
             // First time login — create Firebase Auth account using PIN as password
             try {
               userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
             } catch (createErr: any) {
               if (createErr.code === 'auth/email-already-in-use') {
-                // Auth account exists but wrong password — sign in failed earlier
-                // This means PIN was changed or account exists with different password
                 throw new Error('A sua conta existe mas o PIN não coincide. Contacte o seu gestor para redefinir o PIN.');
               }
               throw createErr;
@@ -292,8 +294,6 @@ export default function UnifiedLoginPage() {
       
       if (userDoc.exists()) {
         const uData = userDoc.data();
-        // If they are a driver, they SHOULD NOT be able to use Google login 
-        // because drivers are typically managed by PIN/Email for simplicity in this app
         if (uData.role === 'driver') {
           await signOut(auth);
           setError('Contas de motorista devem entrar apenas com Email e PIN.');
@@ -302,7 +302,6 @@ export default function UnifiedLoginPage() {
         }
         navigate('/manager/dashboard');
       } else {
-        // If it's a new UID, but the email is already in our 'users' collection as a driver
         if (googleEmail) {
           const q = query(collection(db, 'users'), where('email', '==', googleEmail));
           const snap = await getDocs(q);
@@ -316,13 +315,10 @@ export default function UnifiedLoginPage() {
             }
           }
         }
-        // Truly new user - go to selection or direct register
         navigate('/register/select');
       }
     } catch (err: any) {
       console.error('Google login error:', err);
-      // Only call handleFirestoreError if it's likely a Firestore error, 
-      // preventing misleading "write" errors in logs when it's an Auth failure
       if (err?.code?.startsWith('firestore/')) {
         handleFirestoreError(err, 'get', 'users');
       }
