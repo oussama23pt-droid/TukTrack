@@ -130,24 +130,24 @@ export default function UnifiedLoginPage() {
               console.error('drivers_init lookup failed:', initErr);
             }
 
-            // Second: check users collection for unactivated drivers.
-            // FIXED: Single where('email') only — zero composite indexes needed.
-            // role + uid checks happen in JS after the fetch.
+            // Second: check users collection for drivers not yet activated
+            // FIX: Only filter by email + role to avoid needing a composite Firestore index.
+            // We then check uid in-memory to find unactivated accounts (uid === '').
             if (!driverData) {
               try {
                 const usersSnap = await getDocs(
                   query(
                     collection(db, 'users'),
-                    where('email', '==', cleanEmail)
+                    where('email', '==', cleanEmail),
+                    where('role', '==', 'driver')
                   )
                 );
 
+                // Filter in-memory for unactivated drivers (uid is empty or missing)
                 const unactivatedDocs = usersSnap.docs.filter(d => {
-                  const data = d.data();
-                  return data.role === 'driver' && (!data.uid || data.uid === '');
+                  const uid = d.data().uid;
+                  return !uid || uid === '';
                 });
-
-                const anyDriverDocs = usersSnap.docs.filter(d => d.data().role === 'driver');
 
                 if (unactivatedDocs.length > 0) {
                   const uData = unactivatedDocs[0].data();
@@ -159,7 +159,8 @@ export default function UnifiedLoginPage() {
                   } else {
                     throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
                   }
-                } else if (anyDriverDocs.length > 0) {
+                } else if (!usersSnap.empty) {
+                  // Account exists but already activated — wrong PIN
                   throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
                 } else {
                   throw new Error('Conta nao encontrada. Verifique o email com o seu gestor.');
