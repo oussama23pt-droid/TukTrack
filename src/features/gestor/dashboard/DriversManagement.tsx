@@ -1438,21 +1438,35 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
           return;
         }
 
-        // Always write to drivers_init so driver can login with PIN
+        // Always write to drivers_init so driver can login with PIN.
+        // This is CRITICAL — if it fails, the driver cannot log in at all.
         try {
           await setDoc(doc(db, 'drivers_init', cleanEmail), {
             ...driverData,
+            id: newDriverRef.id,
             pin: finalPin,
           });
         } catch (err) {
-          // drivers_init write failed — not critical, log but continue
+          // drivers_init write failed — this is critical, driver won't be able to login.
+          // Roll back the users document to keep data consistent.
           console.error('drivers_init write failed:', err);
+          try { await deleteDoc(newDriverRef); } catch (_) {}
+          handleFirestoreError(err, 'create', `drivers_init/${cleanEmail}`);
+          return;
         }
       }
       onClose();
     } catch (err: any) {
-      // General error fallback
+      // General error fallback — surface the error so the manager knows registration failed
       console.error('Driver submission error:', err);
+      let message = 'Ocorreu um erro ao guardar o motorista. Por favor, tente novamente.';
+      try {
+        const parsed = JSON.parse(err.message);
+        if (parsed?.error) message = parsed.error;
+      } catch (_) {
+        if (err.message) message = err.message;
+      }
+      alert(message);
     } finally {
       setIsSubmitting(false);
     }
