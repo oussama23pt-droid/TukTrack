@@ -1417,13 +1417,28 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
         }
 
         // Step 1: Create Firebase Auth account with PIN as password
-        // This gives us the real UID immediately - no drivers_init needed
+        // Uses a secondary app instance so the manager's session is never replaced.
         let realUid: string;
         try {
+          const { initializeApp, getApps, deleteApp } = await import('firebase/app');
           const { getAuth, createUserWithEmailAndPassword } = await import('firebase/auth');
-          const firebaseAuth = getAuth();
-          const cred = await createUserWithEmailAndPassword(firebaseAuth, cleanEmail, finalPin);
-          realUid = cred.user.uid;
+
+          // Reuse or create a secondary app dedicated to driver provisioning
+          const secondaryAppName = '__driver_provisioning__';
+          const existingSecondary = getApps().find(a => a.name === secondaryAppName);
+          if (existingSecondary) await deleteApp(existingSecondary);
+
+          const { app: primaryApp } = await import('../../../lib/firebase');
+          const secondaryApp = initializeApp(primaryApp.options, secondaryAppName);
+          const secondaryAuth = getAuth(secondaryApp);
+
+          try {
+            const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, finalPin);
+            realUid = cred.user.uid;
+          } finally {
+            // Always clean up the secondary app so it doesn't accumulate
+            await deleteApp(secondaryApp);
+          }
         } catch (authErr: any) {
           if (authErr.code === 'auth/email-already-in-use') {
             alert('Este e-mail já tem uma conta. Use um e-mail diferente.');
