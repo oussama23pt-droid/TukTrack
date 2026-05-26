@@ -64,8 +64,15 @@ service cloud.firestore {
 
     match /drivers_init/{email} {
       allow get, list: if true;  // Allow unauthenticated reads for driver login
-      allow create: if isManager();
-      allow update, delete: if isSignedIn() && (
+      // Allow any signed-in user to create — the managerId field in the document
+      // ties it to the correct manager. Avoids expensive get() calls in isManager()
+      // that silently fail under quota pressure and block driver registration.
+      allow create: if isSignedIn() && incoming().get('managerId', '') == authUid();
+      allow update: if isSignedIn() && (
+        existing().managerId == authUid() ||
+        request.auth.token.email.lower() == email.lower()
+      );
+      allow delete: if isSignedIn() && (
         existing().managerId == authUid() ||
         request.auth.token.email.lower() == email.lower()
       );
