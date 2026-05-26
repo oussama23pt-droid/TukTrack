@@ -8,7 +8,7 @@ import {
   sendPasswordResetEmail,
   signOut
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { Download } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import { handleFirestoreError } from '../../lib/firestore-utils';
@@ -108,11 +108,11 @@ export default function UnifiedLoginPage() {
             throw demoErr;
           }
         } else {
-          // Driver PIN login — the manager created a real Firebase Auth account
-          // using the PIN as the password, so signInWithEmailAndPassword already
-          // failed above for a real credential reason. Surface the correct error.
+          // Driver PIN login: manager creates Firebase Auth account at registration time
+          // using the PIN as password (DriversManagement.tsx). So signInWithEmailAndPassword
+          // above handles everything. If we reach here the credentials were wrong.
           if (isInvalidCred) {
-            throw new Error('PIN incorreto ou conta não encontrada. Verifique o PIN com o seu gestor.');
+            throw new Error('PIN incorreto ou conta não encontrada. Verifique com o seu gestor.');
           }
           throw authErr;
         }
