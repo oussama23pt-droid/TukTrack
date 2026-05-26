@@ -8,7 +8,7 @@ import {
   sendPasswordResetEmail,
   signOut
 } from 'firebase/auth';
-import { doc, getDoc, query, collection, where, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { Download } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import { handleFirestoreError } from '../../lib/firestore-utils';
@@ -108,11 +108,12 @@ export default function UnifiedLoginPage() {
             throw demoErr;
           }
         } else {
-          // 2. Driver PIN login — check drivers_init first, then users collection
+          // 2. Driver PIN login — lookup via drivers_init (public read, no auth required)
           let driverData = null;
 
           if (isInvalidCred) {
-            // First: check drivers_init (document ID = email)
+            // Check drivers_init — document ID is the driver's email (lowercase)
+            // This collection has: allow get, list: if true — so no auth needed
             try {
               const initDoc = await getDoc(doc(db, 'drivers_init', cleanEmail));
               if (initDoc.exists()) {
@@ -124,54 +125,14 @@ export default function UnifiedLoginPage() {
                 } else {
                   throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
                 }
+              } else {
+                // drivers_init entry missing — driver was not registered correctly by manager
+                throw new Error('Conta não encontrada. Peça ao seu gestor para o registar novamente.');
               }
             } catch (initErr: any) {
-              if (initErr.message?.includes('PIN')) throw initErr;
+              if (initErr.message?.includes('PIN') || initErr.message?.includes('Conta')) throw initErr;
               console.error('drivers_init lookup failed:', initErr);
-            }
-
-            // Second: check users collection for drivers not yet activated
-            // FIX: Only filter by email + role to avoid needing a composite Firestore index.
-            // We then check uid in-memory to find unactivated accounts (uid === '').
-            if (!driverData) {
-              try {
-                const usersSnap = await getDocs(
-                  query(
-                    collection(db, 'users'),
-                    where('email', '==', cleanEmail),
-                    where('role', '==', 'driver')
-                  )
-                );
-
-                // Filter in-memory for unactivated drivers (uid is empty or missing)
-                const unactivatedDocs = usersSnap.docs.filter(d => {
-                  const uid = d.data().uid;
-                  return !uid || uid === '';
-                });
-
-                if (unactivatedDocs.length > 0) {
-                  const uData = unactivatedDocs[0].data();
-                  const docId = unactivatedDocs[0].id;
-                  const storedPin = String(uData.pin || '').trim();
-                  const enteredPin = String(password || '').trim();
-                  if (storedPin === enteredPin) {
-                    driverData = { ...uData, id: docId };
-                  } else {
-                    throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
-                  }
-                } else if (!usersSnap.empty) {
-                  // Account exists but already activated — wrong PIN
-                  throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
-                } else {
-                  throw new Error('Conta nao encontrada. Verifique o email com o seu gestor.');
-                }
-              } catch (usersErr: any) {
-                if (usersErr.message?.includes('PIN') || usersErr.message?.includes('nao encontrada')) {
-                  throw usersErr;
-                }
-                console.error('users lookup failed:', usersErr);
-                throw new Error('Erro de ligacao. Tente novamente.');
-              }
+              throw new Error('Erro de ligação. Verifique a sua conexão e tente novamente.');
             }
           }
 
@@ -189,30 +150,25 @@ export default function UnifiedLoginPage() {
             const newUser = userCredential.user;
             const oldId = driverData.id;
 
-            // Write full profile with real UID
-            try {
-              await setDoc(doc(db, 'users', newUser.uid), {
-                ...driverData,
-                uid: newUser.uid,
-                id: newUser.uid,
-                status: 'active',
-                termsAccepted: true,
-                privacyAccepted: true,
-                acceptedAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              });
+            // Write full profile with real UID — this is CRITICAL
+            await setDoc(doc(db, 'users', newUser.uid), {
+              ...driverData,
+              uid: newUser.uid,
+              id: newUser.uid,
+              status: 'active',
+              termsAccepted: true,
+              privacyAccepted: true,
+              acceptedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            });
 
-              // Remove old placeholder document if different
-              if (oldId && oldId !== newUser.uid) {
-                try { await deleteDoc(doc(db, 'users', oldId)); } catch (_) {}
-              }
-
-              // Clean up drivers_init
-              try { await deleteDoc(doc(db, 'drivers_init', cleanEmail)); } catch (_) {}
-
-            } catch (migErr) {
-              console.error('Profile migration failed:', migErr);
+            // Remove old placeholder document if different (best-effort, non-critical)
+            if (oldId && oldId !== newUser.uid) {
+              try { await deleteDoc(doc(db, 'users', oldId)); } catch (_) {}
             }
+
+            // Clean up drivers_init (best-effort, non-critical)
+            try { await deleteDoc(doc(db, 'drivers_init', cleanEmail)); } catch (_) {}
           } else {
             throw authErr;
           }
