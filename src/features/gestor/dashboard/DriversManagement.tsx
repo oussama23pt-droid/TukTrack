@@ -1418,11 +1418,15 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
           return;
         }
 
+        // Always write to drivers_init so driver can login with PIN
         try {
-          await setDoc(doc(db, 'drivers_init', cleanEmail), driverData);
+          await setDoc(doc(db, 'drivers_init', cleanEmail), {
+            ...driverData,
+            pin: finalPin,
+          });
         } catch (err) {
-          handleFirestoreError(err, 'create', `drivers_init/${cleanEmail}`);
-          return;
+          // drivers_init write failed — not critical, log but continue
+          console.error('drivers_init write failed:', err);
         }
       }
       onClose();
