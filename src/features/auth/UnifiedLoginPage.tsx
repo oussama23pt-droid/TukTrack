@@ -77,14 +77,8 @@ export default function UnifiedLoginPage() {
           authErr.code === 'auth/user-not-found' || 
           authErr.code === 'auth/wrong-password';
 
-        // AUTO-PROVISION DEMO ACCOUNTS (including custom demo accounts)
-        const isDemoAccount = (
-          cleanEmail === 'motorista@test.com' || 
-          cleanEmail === 'gestor@test.com' ||
-          cleanEmail === 'demo-driver@tuktrack.com' ||
-          cleanEmail === 'demo-manager@tuktrack.com'
-        );
-        if (isDemoAccount && (password === '123456' || password === 'Demo1234' || password === 'demo1234')) {
+        // AUTO-PROVISION DEMO ACCOUNTS
+        if ((cleanEmail === 'motorista@test.com' || cleanEmail === 'gestor@test.com') && password === '123456') {
           try {
             // If sign in failed with wrong password for a demo account, it means someone changed it manually 
             // in Auth console, but we'll try to re-create or catch it.
@@ -121,63 +115,66 @@ export default function UnifiedLoginPage() {
             throw demoErr;
           }
         } else {
-          // 2. If it fails, check if it's a pre-registered driver with a PIN in drivers_init
+          // 2. Driver PIN login — check both drivers_init and users collections
           let driverData = null;
-          
+
           if (isInvalidCred) {
-            // Check drivers_init first (pre-registered drivers)
+            // Check drivers_init first
             try {
               const initDoc = await getDoc(doc(db, 'drivers_init', cleanEmail));
               if (initDoc.exists()) {
                 const iData = initDoc.data();
-                if (iData.pin && (String(iData.pin) === String(password))) {
+                if (iData.pin && (String(iData.pin).trim() === String(password).trim())) {
                   driverData = iData;
+                  console.log('[Login] Found in drivers_init');
                 }
               }
             } catch (initErr) {
-              console.error("Drivers init lookup failed:", initErr);
+              console.error('drivers_init lookup failed:', initErr);
             }
 
-            // Also check users collection directly (drivers created by manager)
-            // These have uid:'' because Firebase Auth account doesn't exist yet
+            // Also check users collection (drivers created directly by manager)
             if (!driverData) {
               try {
-                const usersQuery = query(
-                  collection(db, 'users'),
-                  where('email', '==', cleanEmail),
-                  where('role', '==', 'driver')
+                const usersSnap = await getDocs(
+                  query(collection(db, 'users'),
+                    where('email', '==', cleanEmail),
+                    where('role', '==', 'driver')
+                  )
                 );
-                const usersSnap = await getDocs(usersQuery);
                 if (!usersSnap.empty) {
                   const uData = usersSnap.docs[0].data();
-                  // Match by PIN (primary) or allow if no Firebase Auth account exists
-                  if (uData.pin && (String(uData.pin) === String(password))) {
-                    driverData = { ...uData, id: usersSnap.docs[0].id };
+                  const docId = usersSnap.docs[0].id;
+                  console.log('[Login] Found in users, pin:', uData.pin, 'entered:', password);
+                  if (uData.pin && (String(uData.pin).trim() === String(password).trim())) {
+                    driverData = { ...uData, id: docId };
+                    console.log('[Login] PIN matched from users collection');
                   }
                 }
               } catch (usersErr) {
-                console.error("Users collection lookup failed:", usersErr);
+                console.error('users lookup failed:', usersErr);
               }
             }
           }
 
           if (driverData) {
-            // First time login - create Auth account
+            // First time login — create Firebase Auth account using PIN as password
             try {
               userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
             } catch (createErr: any) {
               if (createErr.code === 'auth/email-already-in-use') {
-                throw new Error('A sua conta de e-mail já existe, mas o PIN não coincide. Tente a sua palavra-passe habitual ou mude o PIN com o seu gestor.');
+                // Auth account exists but wrong password — sign in failed earlier
+                // This means PIN was changed or account exists with different password
+                throw new Error('A sua conta existe mas o PIN não coincide. Contacte o seu gestor para redefinir o PIN.');
               }
               throw createErr;
             }
-            
+
             const newUser = userCredential.user;
-            
-            // Link UID and Clean up
+            const oldId = driverData.id;
+
+            // Write full profile with real UID
             try {
-              const oldId = driverData.id;
-              
               await setDoc(doc(db, 'users', newUser.uid), {
                 ...driverData,
                 uid: newUser.uid,
@@ -186,17 +183,19 @@ export default function UnifiedLoginPage() {
                 termsAccepted: true,
                 privacyAccepted: true,
                 acceptedAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
+                updatedAt: new Date().toISOString(),
               });
-              
-              // Remove placeholder if it exists and is different from UID
+
+              // Remove old placeholder document if different
               if (oldId && oldId !== newUser.uid) {
-                await deleteDoc(doc(db, 'users', oldId));
+                try { await deleteDoc(doc(db, 'users', oldId)); } catch (_) {}
               }
-              
-              await deleteDoc(doc(db, 'drivers_init', cleanEmail));
+
+              // Clean up drivers_init
+              try { await deleteDoc(doc(db, 'drivers_init', cleanEmail)); } catch (_) {}
+
             } catch (migErr) {
-              console.error("Migration profile creation failed:", migErr);
+              console.error('Profile migration failed:', migErr);
             }
           } else {
             throw authErr;
