@@ -108,12 +108,11 @@ export default function UnifiedLoginPage() {
             throw demoErr;
           }
         } else {
-          // 2. Driver PIN login — lookup via drivers_init (public read, no auth required)
+          // 2. Driver PIN login — check drivers_init first, then users collection
           let driverData = null;
 
           if (isInvalidCred) {
-            // Check drivers_init — document ID is the driver's email (lowercase)
-            // This collection has: allow get, list: if true — so no auth needed
+            // First: check drivers_init (document ID = email)
             try {
               const initDoc = await getDoc(doc(db, 'drivers_init', cleanEmail));
               if (initDoc.exists()) {
@@ -125,14 +124,18 @@ export default function UnifiedLoginPage() {
                 } else {
                   throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
                 }
-              } else {
-                // drivers_init entry missing — driver was not registered correctly by manager
-                throw new Error('Conta não encontrada. Peça ao seu gestor para o registar novamente.');
               }
             } catch (initErr: any) {
-              if (initErr.message?.includes('PIN') || initErr.message?.includes('Conta')) throw initErr;
+              if (initErr.message?.includes('PIN')) throw initErr;
               console.error('drivers_init lookup failed:', initErr);
-              throw new Error('Erro de ligação. Verifique a sua conexão e tente novamente.');
+            }
+
+            // drivers_init is the ONLY lookup for unactivated drivers.
+            // The users collection requires authentication for list queries so
+            // it cannot be used here. If drivers_init has no entry the manager
+            // must re-register the driver.
+            if (!driverData) {
+              throw new Error('Conta não encontrada. Peça ao seu gestor para registar novamente.');
             }
           }
 
@@ -150,7 +153,7 @@ export default function UnifiedLoginPage() {
             const newUser = userCredential.user;
             const oldId = driverData.id;
 
-            // Write full profile with real UID — this is CRITICAL
+            // Write full profile with real UID — CRITICAL, must not fail silently
             await setDoc(doc(db, 'users', newUser.uid), {
               ...driverData,
               uid: newUser.uid,
@@ -162,12 +165,12 @@ export default function UnifiedLoginPage() {
               updatedAt: new Date().toISOString(),
             });
 
-            // Remove old placeholder document if different (best-effort, non-critical)
+            // Remove old placeholder document (best-effort)
             if (oldId && oldId !== newUser.uid) {
               try { await deleteDoc(doc(db, 'users', oldId)); } catch (_) {}
             }
 
-            // Clean up drivers_init (best-effort, non-critical)
+            // Clean up drivers_init (best-effort)
             try { await deleteDoc(doc(db, 'drivers_init', cleanEmail)); } catch (_) {}
           } else {
             throw authErr;
