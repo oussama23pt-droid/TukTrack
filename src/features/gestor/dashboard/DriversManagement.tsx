@@ -360,7 +360,7 @@ export default function DriversManagement({ initialTab, hideTabs = false }: { in
           setIsAddDriverOpen(false);
           setEditingDriver(null);
         }} 
-        managerId={userData?.uid || ''}
+        managerId={user?.uid || ''}
         initialData={editingDriver}
         onDelete={(data) => {
           setIsAddDriverOpen(false);
@@ -1333,6 +1333,11 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
     }
     if (!initialData && pin.length !== 6) {
       alert('O PIN deve ter exatamente 6 algarismos.');
+      return;
+    }
+
+    if (!managerId) {
+      alert('Erro: ID do gestor em falta. Por favor recarregue a página e tente novamente.');
       return;
     }
 
