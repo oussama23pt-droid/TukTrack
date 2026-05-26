@@ -1418,29 +1418,30 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
 
         // Step 1: Create Firebase Auth account with PIN as password.
         // Uses a secondary Firebase app so the manager's auth session is never replaced.
+        // NOTE: We do NOT deleteApp() after use — on some Firebase SDK versions deleteApp()
+        // internally calls signOut() which pollutes the primary app's onAuthStateChanged
+        // listener and causes the manager (or a subsequent driver login) to be kicked out.
+        // The secondary app is simply left idle; it has no persistent listeners or costs.
         let realUid: string;
         try {
-          const { initializeApp, getApps, deleteApp } = await import('firebase/app');
-          const { getAuth, createUserWithEmailAndPassword } = await import('firebase/auth');
+          const { initializeApp, getApps, getApp } = await import('firebase/app');
+          const { getAuth, createUserWithEmailAndPassword, signOut: secondarySignOut } = await import('firebase/auth');
 
           const secondaryAppName = '__driver_provisioning__';
 
-          // Clean up any leftover secondary app from a previous failed attempt
-          const existing = getApps().find(a => a.name === secondaryAppName);
-          if (existing) await deleteApp(existing);
-
-          // Use the same config as the primary app — read from the already-initialised instance
-          const { getApp } = await import('firebase/app');
-          const primaryOptions = getApp().options;
-          const secondaryApp = initializeApp(primaryOptions, secondaryAppName);
+          // Reuse existing secondary app if already initialised (avoids duplicate-app error)
+          const existingSecondary = getApps().find(a => a.name === secondaryAppName);
+          const secondaryApp = existingSecondary ?? initializeApp(getApp().options, secondaryAppName);
           const secondaryAuth = getAuth(secondaryApp);
 
-          try {
-            const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, finalPin);
-            realUid = cred.user.uid;
-          } finally {
-            await deleteApp(secondaryApp);
-          }
+          // Sign out of secondary first to ensure a clean state
+          await secondarySignOut(secondaryAuth).catch(() => {});
+
+          const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, finalPin);
+          realUid = cred.user.uid;
+
+          // Sign out of secondary so it holds no active session (but don't deleteApp)
+          await secondarySignOut(secondaryAuth).catch(() => {});
         } catch (authErr: any) {
           if (authErr.code === 'auth/email-already-in-use') {
             alert('Este e-mail já tem uma conta. Use um e-mail diferente.');
