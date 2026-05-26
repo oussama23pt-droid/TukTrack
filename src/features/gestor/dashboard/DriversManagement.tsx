@@ -1416,27 +1416,29 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
           throw err;
         }
 
-        // Step 1: Create Firebase Auth account with PIN as password
-        // Uses a secondary app instance so the manager's session is never replaced.
+        // Step 1: Create Firebase Auth account with PIN as password.
+        // Uses a secondary Firebase app so the manager's auth session is never replaced.
         let realUid: string;
         try {
           const { initializeApp, getApps, deleteApp } = await import('firebase/app');
           const { getAuth, createUserWithEmailAndPassword } = await import('firebase/auth');
 
-          // Reuse or create a secondary app dedicated to driver provisioning
           const secondaryAppName = '__driver_provisioning__';
-          const existingSecondary = getApps().find(a => a.name === secondaryAppName);
-          if (existingSecondary) await deleteApp(existingSecondary);
 
-          const { app: primaryApp } = await import('../../../lib/firebase');
-          const secondaryApp = initializeApp(primaryApp.options, secondaryAppName);
+          // Clean up any leftover secondary app from a previous failed attempt
+          const existing = getApps().find(a => a.name === secondaryAppName);
+          if (existing) await deleteApp(existing);
+
+          // Use the same config as the primary app — read from the already-initialised instance
+          const { getApp } = await import('firebase/app');
+          const primaryOptions = getApp().options;
+          const secondaryApp = initializeApp(primaryOptions, secondaryAppName);
           const secondaryAuth = getAuth(secondaryApp);
 
           try {
             const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, finalPin);
             realUid = cred.user.uid;
           } finally {
-            // Always clean up the secondary app so it doesn't accumulate
             await deleteApp(secondaryApp);
           }
         } catch (authErr: any) {
