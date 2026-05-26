@@ -43,17 +43,15 @@ service cloud.firestore {
         isManager() || 
         (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == uid)
       );
-      allow list: if (
-        // Unauthenticated: only allow reading unactivated driver accounts (uid == "")
-        // This is needed for first-time driver login with PIN
-        (request.auth == null && resource.data.get('uid', '') == '' && resource.data.get('role', '') == 'driver') ||
-        // Authenticated users
-        (isSignedIn() && (
-          resource.data.get('uid', '') == authUid() || 
-          resource.data.get('managerId', '') == authUid() ||
-          (request.auth.token.get('email', '') != '' && request.auth.token.email.lower() == resource.data.get('email', '').lower()) ||
-          isManager()
-        ))
+      // NOTE: Unauthenticated list is intentionally NOT allowed here.
+      // First-time driver login uses drivers_init (allow list: if true) instead.
+      // Allowing unauthenticated list on users would require every doc in the
+      // result set to pass the rule — impossible for a mixed collection.
+      allow list: if isSignedIn() && (
+        resource.data.get('uid', '') == authUid() || 
+        resource.data.get('managerId', '') == authUid() ||
+        (request.auth.token.get('email', '') != '' && request.auth.token.email.lower() == resource.data.get('email', '').lower()) ||
+        isManager()
       );
       allow create: if isSignedIn() && (authUid() == uid || isManager());
       allow update: if isSignedIn() && (authUid() == uid || isManager());
