@@ -130,24 +130,24 @@ export default function UnifiedLoginPage() {
               console.error('drivers_init lookup failed:', initErr);
             }
 
-            // Second: check users collection for drivers not yet activated
-            // FIX: Only filter by email + role to avoid needing a composite Firestore index.
-            // We then check uid in-memory to find unactivated accounts (uid === '').
+            // Second: check users collection for unactivated drivers.
+            // FIXED: Single where('email') clause — no composite Firestore index needed.
+            // All role/uid filtering is done in JavaScript after the fetch.
             if (!driverData) {
               try {
                 const usersSnap = await getDocs(
                   query(
                     collection(db, 'users'),
-                    where('email', '==', cleanEmail),
-                    where('role', '==', 'driver')
+                    where('email', '==', cleanEmail)
                   )
                 );
 
-                // Filter in-memory for unactivated drivers (uid is empty or missing)
                 const unactivatedDocs = usersSnap.docs.filter(d => {
-                  const uid = d.data().uid;
-                  return !uid || uid === '';
+                  const data = d.data();
+                  return data.role === 'driver' && (!data.uid || data.uid === '');
                 });
+
+                const anyDriverDocs = usersSnap.docs.filter(d => d.data().role === 'driver');
 
                 if (unactivatedDocs.length > 0) {
                   const uData = unactivatedDocs[0].data();
@@ -159,8 +159,8 @@ export default function UnifiedLoginPage() {
                   } else {
                     throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
                   }
-                } else if (!usersSnap.empty) {
-                  // Account exists but already activated — wrong PIN
+                } else if (anyDriverDocs.length > 0) {
+                  // Driver exists but already activated — must be wrong PIN
                   throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
                 } else {
                   throw new Error('Conta nao encontrada. Verifique o email com o seu gestor.');
