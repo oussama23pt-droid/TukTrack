@@ -8,7 +8,7 @@ import {
   sendPasswordResetEmail,
   signOut
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { Download } from 'lucide-react';
 import { auth, db } from '../../lib/firebase';
 import { handleFirestoreError } from '../../lib/firestore-utils';
@@ -108,73 +108,13 @@ export default function UnifiedLoginPage() {
             throw demoErr;
           }
         } else {
-          // 2. Driver PIN login — check drivers_init first, then users collection
-          let driverData = null;
-
+          // Driver PIN login — the manager created a real Firebase Auth account
+          // using the PIN as the password, so signInWithEmailAndPassword already
+          // failed above for a real credential reason. Surface the correct error.
           if (isInvalidCred) {
-            // First: check drivers_init (document ID = email)
-            try {
-              const initDoc = await getDoc(doc(db, 'drivers_init', cleanEmail));
-              if (initDoc.exists()) {
-                const iData = initDoc.data();
-                const storedPin = String(iData.pin || '').trim();
-                const enteredPin = String(password || '').trim();
-                if (storedPin === enteredPin) {
-                  driverData = iData;
-                } else {
-                  throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
-                }
-              }
-            } catch (initErr: any) {
-              if (initErr.message?.includes('PIN')) throw initErr;
-              console.error('drivers_init lookup failed:', initErr);
-            }
-
-            // drivers_init is the ONLY lookup for unactivated drivers.
-            // The users collection requires authentication for list queries so
-            // it cannot be used here. If drivers_init has no entry the manager
-            // must re-register the driver.
-            if (!driverData) {
-              throw new Error('Conta não encontrada. Peça ao seu gestor para registar novamente.');
-            }
+            throw new Error('PIN incorreto ou conta não encontrada. Verifique o PIN com o seu gestor.');
           }
-
-          if (driverData) {
-            // First time login — create Firebase Auth account using PIN as password
-            try {
-              userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
-            } catch (createErr: any) {
-              if (createErr.code === 'auth/email-already-in-use') {
-                throw new Error('A sua conta existe mas o PIN não coincide. Contacte o seu gestor para redefinir o PIN.');
-              }
-              throw createErr;
-            }
-
-            const newUser = userCredential.user;
-            const oldId = driverData.id;
-
-            // Write full profile with real UID — CRITICAL, must not fail silently
-            await setDoc(doc(db, 'users', newUser.uid), {
-              ...driverData,
-              uid: newUser.uid,
-              id: newUser.uid,
-              status: 'active',
-              termsAccepted: true,
-              privacyAccepted: true,
-              acceptedAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            });
-
-            // Remove old placeholder document (best-effort)
-            if (oldId && oldId !== newUser.uid) {
-              try { await deleteDoc(doc(db, 'users', oldId)); } catch (_) {}
-            }
-
-            // Clean up drivers_init (best-effort)
-            try { await deleteDoc(doc(db, 'drivers_init', cleanEmail)); } catch (_) {}
-          } else {
-            throw authErr;
-          }
+          throw authErr;
         }
       }
 
