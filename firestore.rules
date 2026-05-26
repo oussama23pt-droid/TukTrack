@@ -1,187 +1,68 @@
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    
-    function isSignedIn() { return request.auth != null; }
-    function authUid() { return request.auth.uid; }
-    function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
-    
-    function getAuthUserData() { 
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; 
-    }
-    
-    function isManager() { 
-      return isSignedIn() && 
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'none') == 'manager' || 
-              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'none') == 'owner');
-    }
+import { initializeApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
+import { getFirestore, enableIndexedDbPersistence, doc, getDocFromServer } from 'firebase/firestore';
 
-    function getSubscriptionVault() {
-      return exists(/databases/$(database)/documents/manager_subscriptions/$(request.auth.uid)) 
-             ? get(/databases/$(database)/documents/manager_subscriptions/$(request.auth.uid)).data 
-             : null;
-    }
+// Hardcoded config for production stability in Android WebView
+const firebaseConfig = {
+  projectId: "tuktrack-19377",
+  appId: "1:215697767558:web:a6154216c6467dca2ca507",
+  apiKey: "AIzaSyC4apmP6vU30HeEHz9wbOHF39x0JkWmrqs",
+  authDomain: "tuktrack-19377.firebaseapp.com",
+  firestoreDatabaseId: "ai-studio-0eae0393-9377-476d-bb10-e5059265bcb8",
+  storageBucket: "tuktrack-19377.firebasestorage.app",
+  messagingSenderId: "215697767558",
+  measurementId: ""
+};
 
-    function hasAvailableSlots() {
-      return isManager() && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('vehicleSlots', 1) >= 1 ||
-        (getSubscriptionVault() != null && getSubscriptionVault().get('vehicleSlots', 1) >= 1)
-      );
-    }
-    
-    function isValidId(id) { return id is string && id.size() <= 128; }
+// Initialize Firebase
+export const app = initializeApp(firebaseConfig);
 
-    match /{document=**} {
-      allow read, write: if false;
-    }
+// Initialize Firestore
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
-    match /users/{uid} {
-      allow get: if isSignedIn() && (
-        authUid() == uid || 
-        isManager() || 
-        (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == uid)
-      );
-      // NOTE: Unauthenticated list is intentionally NOT allowed here.
-      // First-time driver login uses drivers_init (allow list: if true) instead.
-      // Allowing unauthenticated list on users would require every doc in the
-      // result set to pass the rule — impossible for a mixed collection.
-      allow list: if isSignedIn() && (
-        resource.data.get('uid', '') == authUid() || 
-        resource.data.get('managerId', '') == authUid() ||
-        (request.auth.token.get('email', '') != '' && request.auth.token.email.lower() == resource.data.get('email', '').lower()) ||
-        isManager()
-      );
-      allow create: if isSignedIn() && (authUid() == uid || isManager());
-      allow update: if isSignedIn() && (authUid() == uid || isManager());
-      allow delete: if isSignedIn() && (
-        authUid() == uid || 
-        (isManager() && existing().get('managerId', '') == authUid()) ||
-        (existing().get('uid', '') == '' && request.auth.token.get('email', '') != '' && request.auth.token.email.lower() == existing().get('email', '').lower())
-      );
-    }
+// Initialize Auth
+export const auth = getAuth(app);
 
-    match /drivers_init/{email} {
-      allow get, list: if true;
-      // Simple signed-in check + managerId field match avoids expensive get() calls
-      // inside isManager() that silently deny writes under quota pressure.
-      allow create: if isSignedIn() && incoming().get('managerId', '') == authUid();
-      allow update: if isSignedIn() && (
-        existing().managerId == authUid() ||
-        request.auth.token.email.lower() == email.lower()
-      );
-      allow delete: if isSignedIn() && (
-        existing().managerId == authUid() ||
-        request.auth.token.email.lower() == email.lower()
-      );
+// Initialize Firestore persistence safely
+if (typeof window !== 'undefined') {
+  enableIndexedDbPersistence(db).catch((err) => {
+    if (err.code === 'failed-precondition') {
+      console.warn('Firestore persistence failed: Multiple tabs open');
+    } else if (err.code === 'unimplemented') {
+      console.warn('Firestore persistence: Browser not supported');
+    } else {
+      console.error('Firestore persistence error:', err);
     }
+  });
+}
 
-    match /trips/{id} {
-      allow read: if isSignedIn() && (
-        resource.data.get('managerId', '') == authUid() ||
-        resource.data.get('driverUid', '') == authUid() ||
-        (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
-      );
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() && (
-        resource.data.managerId == authUid() ||
-        resource.data.driverUid == authUid()
-      );
-      allow delete: if isManager() && existing().managerId == authUid();
-    }
+export async function testConnection() {
+  console.log('[FIREBASE] Validating connection...');
+  
+  // Set a timeout for the connection test so we don't block the app indefinitely
+  const timeoutPromise = new Promise((_, reject) => 
+    setTimeout(() => reject(new Error('Connection test timeout')), 5000)
+  );
 
-    match /vehicles/{id} {
-      allow read: if isSignedIn() && (
-        resource.data.get('managerId', '') == request.auth.uid ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
-      );
-      allow create: if isSignedIn() && isManager() && (request.resource.data.get('managerId', '') == request.auth.uid);
-      allow update, delete: if isSignedIn() && (
-        resource.data.get('managerId', '') == request.auth.uid || isManager()
-      );
-    }
-
-    match /routes/{id} {
-      allow read: if isSignedIn() && (
-        resource.data.get('managerId', '') == authUid() ||
-        (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
-      );
-      allow write: if isManager();
-    }
-
-    match /shifts/{id} {
-      allow read: if isSignedIn() && (
-        resource.data.get('managerId', '') == authUid() ||
-        resource.data.get('driverUid', '') == authUid() ||
-        (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
-      );
-      allow write: if isManager();
-    }
-
-    match /sos_alerts/{id} {
-      allow read: if isSignedIn() && (
-        resource.data.get('managerId', '') == authUid() ||
-        (exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
-      );
-      allow write: if isSignedIn();
-    }
-
-    match /notifications/{id} {
-      allow create: if isSignedIn();
-      allow read: if isSignedIn() && (
-        resource.data.get('managerId', '') == authUid() ||
-        resource.data.get('driverUid', '') == authUid() ||
-        (resource.data.get('isForDrivers', false) == true && exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
-      );
-      allow update: if isSignedIn() && (
-        (resource.data.managerId == authUid()) ||
-        (
-          incoming().diff(existing()).affectedKeys().hasOnly(['read']) &&
-          (
-            resource.data.get('driverUid', '') == authUid() ||
-            (resource.data.get('isForDrivers', false) == true && exists(/databases/$(database)/documents/users/$(authUid())) && getAuthUserData().get('managerId', '') == resource.data.get('managerId', ''))
-          )
-        )
-      );
-      allow delete: if isManager() && existing().managerId == authUid();
-    }
-
-    // ── MESSAGES — this was MISSING and caused the conversation error ──
-    match /messages/{id} {
-      // Both driver and manager in the same team can read their messages
-      allow read: if isSignedIn() && (
-        // Manager reads messages in their team
-        resource.data.get('managerId', '') == authUid() ||
-        // Driver reads messages addressed to them
-        resource.data.get('driverUid', '') == authUid()
-      );
-      // Both driver and manager can create messages
-      allow create: if isSignedIn() && (
-        // Driver can only send as themselves
-        (incoming().get('driverUid', '') == authUid() && incoming().get('senderRole', '') == 'driver') ||
-        // Manager can only send from their own account
-        (incoming().get('managerId', '') == authUid() && incoming().get('senderRole', '') == 'manager')
-      );
-      // No updates or deletes on messages (immutable chat history)
-      allow update, delete: if false;
-    }
-
-    match /customers/{uid}/{document=**} {
-      allow read, write: if isSignedIn() && authUid() == uid;
-    }
-
-    match /users/{uid}/transactions/{id} {
-      allow read: if isSignedIn() && (authUid() == uid || isManager());
-    }
-
-    match /users/{uid}/invoices/{id} {
-      allow read: if isSignedIn() && (authUid() == uid || isManager());
-    }
-
-    match /manager_subscriptions/{uid} {
-      allow read: if isSignedIn() && (authUid() == uid || isManager());
-      allow write: if isSignedIn() && authUid() == uid;
+  try {
+    // Attempt to read a dummy document to verify connection with a 5s limit
+    await Promise.race([
+      getDocFromServer(doc(db, '_connection_test_', 'verifying')),
+      timeoutPromise
+    ]);
+    console.log('[FIREBASE] Connection verified.');
+  } catch (error: any) {
+    if (error?.message?.includes('timeout')) {
+      console.warn("[FIREBASE] Connection test timed out, proceeding anyway.");
+    } else if (error?.message?.includes('the client is offline')) {
+      console.warn("[FIREBASE] Offline mode active.");
+    } else if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized domain')) {
+      console.error('[FIREBASE] Erro: Domínio não autorizado. Verifique as configurações do Firebase Console.');
+      alert('ERRO DE DOMÍNIO: Este domínio precisa de ser adicionado aos "Domínios Autorizados" nas definições de Autenticação do Firebase.');
+    } else if (error?.code === 'permission-denied') {
+      console.log('[FIREBASE] Connection verified (received expected permission-denied).');
+    } else {
+      console.error('[FIREBASE] Connection error:', error?.message || error);
     }
   }
 }
