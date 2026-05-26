@@ -115,49 +115,33 @@ export default function UnifiedLoginPage() {
             throw demoErr;
           }
         } else {
-          // 2. Driver PIN login — check both drivers_init and users collections
+          // 2. Driver PIN login — check drivers_init collection
           let driverData = null;
 
           if (isInvalidCred) {
-            // Check drivers_init first
             try {
               const initDoc = await getDoc(doc(db, 'drivers_init', cleanEmail));
               if (initDoc.exists()) {
                 const iData = initDoc.data();
-                if (iData.pin && (String(iData.pin).trim() === String(password).trim())) {
+                const storedPin = String(iData.pin || '').trim();
+                const enteredPin = String(password || '').trim();
+                if (storedPin === enteredPin) {
                   driverData = iData;
-                  console.log('[Login] Found in drivers_init');
+                } else {
+                  throw new Error('PIN incorreto. Verifique o PIN de 6 algarismos com o seu gestor.');
                 }
+              } else {
+                throw new Error('Conta nao encontrada. Verifique o email com o seu gestor ou se ja fez login antes.');
               }
-            } catch (initErr) {
+            } catch (initErr: any) {
+              if (initErr.message?.includes('PIN') || initErr.message?.includes('nao encontrada')) {
+                throw initErr;
+              }
               console.error('drivers_init lookup failed:', initErr);
-            }
-
-            // Also check users collection (drivers created directly by manager)
-            if (!driverData) {
-              try {
-                const usersSnap = await getDocs(
-                  query(collection(db, 'users'),
-                    where('email', '==', cleanEmail),
-                    where('role', '==', 'driver')
-                  )
-                );
-                if (!usersSnap.empty) {
-                  const uData = usersSnap.docs[0].data();
-                  const docId = usersSnap.docs[0].id;
-                  console.log('[Login] Found in users, pin:', uData.pin, 'entered:', password);
-                  if (uData.pin && (String(uData.pin).trim() === String(password).trim())) {
-                    driverData = { ...uData, id: docId };
-                    console.log('[Login] PIN matched from users collection');
-                  }
-                }
-              } catch (usersErr) {
-                console.error('users lookup failed:', usersErr);
-              }
             }
           }
 
-          if (driverData) {
+                    if (driverData) {
             // First time login — create Firebase Auth account using PIN as password
             try {
               userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
