@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Users, Search, Plus, Phone, Mail, MapPin, CheckCircle2, X, Shield, Palette, Settings, Trash2, Edit2, Briefcase, CreditCard, ChevronRight, Activity, Lock, Clock, Timer, Loader2, ExternalLink, Trophy } from 'lucide-react';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc, addDoc, getDoc, getDocs } from 'firebase/firestore';
-import { db, auth } from '../../../lib/firebase';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { db } from '../../../lib/firebase';
 import { handleFirestoreError, sanitizeData } from '../../../lib/firestore-utils';
 import { useAuth } from '../../auth/AuthContext';
 import { cn } from '../../../lib/utils';
@@ -1417,27 +1416,28 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
           throw err;
         }
 
-        // Create Firebase Auth account immediately using PIN as password.
-        // This means the driver can log in with signInWithEmailAndPassword directly —
-        // no drivers_init collection needed, no quota issues, no silent failures.
-        let newUid: string;
+        // Step 1: Create Firebase Auth account with PIN as password
+        // This gives us the real UID immediately - no drivers_init needed
+        let realUid: string;
         try {
-          const credential = await createUserWithEmailAndPassword(auth, cleanEmail, finalPin);
-          newUid = credential.user.uid;
-        } catch (err: any) {
-          if (err.code === 'auth/email-already-in-use') {
-            alert('Este e-mail já tem uma conta de autenticação. Use um e-mail diferente.');
+          const { getAuth, createUserWithEmailAndPassword } = await import('firebase/auth');
+          const firebaseAuth = getAuth();
+          const cred = await createUserWithEmailAndPassword(firebaseAuth, cleanEmail, finalPin);
+          realUid = cred.user.uid;
+        } catch (authErr: any) {
+          if (authErr.code === 'auth/email-already-in-use') {
+            alert('Este e-mail já tem uma conta. Use um e-mail diferente.');
           } else {
-            alert('Erro ao criar conta: ' + (err?.message || err));
+            alert('Erro ao criar conta de acesso: ' + (authErr?.message || authErr));
           }
           setIsSubmitting(false);
           return;
         }
 
-        // Write the full Firestore profile with the real UID from the start.
+        // Step 2: Write Firestore profile with the real UID from Auth
         const driverData = sanitizeData({
-          id: newUid,
-          uid: newUid,
+          id: realUid,
+          uid: realUid,
           managerId,
           name: name.trim(),
           email: cleanEmail,
@@ -1450,9 +1450,10 @@ function UpsertDriverModal({ isOpen, onClose, managerId, initialData, onDelete }
         });
 
         try {
-          await setDoc(doc(db, 'users', newUid), driverData);
-        } catch (err) {
-          handleFirestoreError(err, 'create', `users/${newUid}`);
+          await setDoc(doc(db, 'users', realUid), driverData);
+        } catch (err: any) {
+          alert('Conta criada mas erro ao guardar perfil: ' + (err?.message || err));
+          setIsSubmitting(false);
           return;
         }
       }
