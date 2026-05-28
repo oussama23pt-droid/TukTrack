@@ -41,17 +41,15 @@ jobs:
 
       - name: Fix Gradle wrapper jar
         run: |
-          cd android
-          mkdir -p gradle/wrapper
-          curl -fL -o /tmp/gradle-8.4-bin.zip https://services.gradle.org/distributions/gradle-8.4-bin.zip
-          unzip -q /tmp/gradle-8.4-bin.zip -d /tmp/gradle-dist
-          /tmp/gradle-dist/gradle-8.4/bin/gradle wrapper --gradle-version 8.4
-          chmod +x gradlew
+          mkdir -p android/gradle/wrapper
+          curl -fsSL "https://github.com/gradle/gradle/raw/v8.4.0/gradle/wrapper/gradle-wrapper.jar" \
+            -o android/gradle/wrapper/gradle-wrapper.jar
+          chmod +x android/gradlew
 
       - name: Generate app icons
         run: |
           pip install pillow --quiet
-          echo "ZnJvbSBQSUwgaW1wb3J0IEltYWdlLCBJbWFnZURyYXcKaW1wb3J0IG9zCmJhc2UgPSAiYW5kcm9pZC9hcHAvc3JjL21haW4vcmVzIgpzcmNfcGF0aCA9ICJwdWJsaWMvcHdhLTUxMng1MTIucG5nIgppZiBub3Qgb3MucGF0aC5leGlzdHMoc3JjX3BhdGgpOgogICAgc3JjX3BhdGggPSAicHVibGljL3B3YS0xOTJ4MTkyLnBuZyIKc3JjX2ltZyA9IEltYWdlLm9wZW4oc3JjX3BhdGgpLmNvbnZlcnQoIlJHQkEiKSBpZiBvcy5wYXRoLmV4aXN0cyhzcmNfcGF0aCkgZWxzZSBJbWFnZS5uZXcoIlJHQkEiLCg1MTIsNTEyKSwoMzAsMTAwLDIyMCwyNTUpKQpmb3IgZm9sZGVyLCBzaXplIGluIFsoIm1pcG1hcC1tZHBpIiw0OCksKCJtaXBtYXAtaGRwaSIsNzIpLCgibWlwbWFwLXhoZHBpIiw5NiksKCJtaXBtYXAteHhoZHBpIiwxNDQpLCgibWlwbWFwLXh4eGhkcGkiLDE5MildOgogICAgcGF0aCA9IG9zLnBhdGguam9pbihiYXNlLCBmb2xkZXIpCiAgICBvcy5tYWtlZGlycyhwYXRoLCBleGlzdF9vaz1UcnVlKQogICAgaW1nID0gc3JjX2ltZy5yZXNpemUoKHNpemUsc2l6ZSksIEltYWdlLkxBTkNaT1MpCiAgICBpbWcuc2F2ZShvcy5wYXRoLmpvaW4ocGF0aCwiaWNfbGF1bmNoZXIucG5nIikpCiAgICBpbWcuc2F2ZShvcy5wYXRoLmpvaW4ocGF0aCwiaWNfbGF1bmNoZXJfcm91bmQucG5nIikpCiAgICBpbWcuc2F2ZShvcy5wYXRoLmpvaW4ocGF0aCwiaWNfbGF1bmNoZXJfZm9yZWdyb3VuZC5wbmciKSkKIyBpY19zdGF0X2ljb24gaXMgZGVmaW5lZCBhcyBpY19zdGF0X2ljb24ueG1sIGluIGRyYXdhYmxlLyDigJQgc2tpcCB0aGF0IGZvbGRlciB0byBhdm9pZCBkdXBsaWNhdGUgcmVzb3VyY2VzCiMgT25seSBnZW5lcmF0ZSBQTkcgdmVyc2lvbnMgaW4gZGVuc2l0eS1zcGVjaWZpYyBmb2xkZXJzICh0aGVzZSBkbyBub3QgY29uZmxpY3Qgd2l0aCB0aGUgWE1MKQpmb3IgZm9sZGVyLCBzaXplIGluIFsoImRyYXdhYmxlLW1kcGkiLDI0KSwoImRyYXdhYmxlLWhkcGkiLDM2KSwoImRyYXdhYmxlLXhoZHBpIiw0OCksKCJkcmF3YWJsZS14eGhkcGkiLDcyKSwoImRyYXdhYmxlLXh4eGhkcGkiLDk2KV06CiAgICBwYXRoID0gb3MucGF0aC5qb2luKGJhc2UsIGZvbGRlcikKICAgIG9zLm1ha2VkaXJzKHBhdGgsIGV4aXN0X29rPVRydWUpCiAgICBpbWcgPSBJbWFnZS5uZXcoIlJHQkEiLChzaXplLHNpemUpLCgwLDAsMCwwKSkKICAgIG0gPSBzaXplLy82CiAgICBJbWFnZURyYXcuRHJhdyhpbWcpLmVsbGlwc2UoW20sbSxzaXplLW0tMSxzaXplLW0tMV0sZmlsbD0oMjU1LDI1NSwyNTUsMjU1KSkKICAgIGltZy5zYXZlKG9zLnBhdGguam9pbihwYXRoLCJpY19zdGF0X2ljb24ucG5nIikpCnByaW50KCJJY29ucyBnZW5lcmF0ZWQiKQo=" | base64 -d > /tmp/gen_icons.py
+          echo "ZnJvbSBQSUwgaW1wb3J0IEltYWdlLCBJbWFnZURyYXcKaW1wb3J0IG9zCmJhc2UgPSAiYW5kcm9pZC9hcHAvc3JjL21haW4vcmVzIgpzcmNfcGF0aCA9ICJwdWJsaWMvcHdhLTUxMng1MTIucG5nIgppZiBub3Qgb3MucGF0aC5leGlzdHMoc3JjX3BhdGgpOgogICAgc3JjX3BhdGggPSAicHVibGljL3B3YS0xOTJ4MTkyLnBuZyIKc3JjX2ltZyA9IEltYWdlLm9wZW4oc3JjX3BhdGgpLmNvbnZlcnQoIlJHQkEiKSBpZiBvcy5wYXRoLmV4aXN0cyhzcmNfcGF0aCkgZWxzZSBJbWFnZS5uZXcoIlJHQkEiLCg1MTIsNTEyKSwoMzAsMTAwLDIyMCwyNTUpKQpmb3IgZm9sZGVyLCBzaXplIGluIFsoIm1pcG1hcC1tZHBpIiw0OCksKCJtaXBtYXAtaGRwaSIsNzIpLCgibWlwbWFwLXhoZHBpIiw5NiksKCJtaXBtYXAteHhoZHBpIiwxNDQpLCgibWlwbWFwLXh4eGhkcGkiLDE5MildOgogICAgcGF0aCA9IG9zLnBhdGguam9pbihiYXNlLCBmb2xkZXIpCiAgICBvcy5tYWtlZGlycyhwYXRoLCBleGlzdF9vaz1UcnVlKQogICAgaW1nID0gc3JjX2ltZy5yZXNpemUoKHNpemUsc2l6ZSksIEltYWdlLkxBTkNaT1MpCiAgICBpbWcuc2F2ZShvcy5wYXRoLmpvaW4ocGF0aCwiaWNfbGF1bmNoZXIucG5nIikpCiAgICBpbWcuc2F2ZShvcy5wYXRoLmpvaW4ocGF0aCwiaWNfbGF1bmNoZXJfcm91bmQucG5nIikpCiAgICBpbWcuc2F2ZShvcy5wYXRoLmpvaW4ocGF0aCwiaWNfbGF1bmNoZXJfZm9yZWdyb3VuZC5wbmciKSkKZm9yIGZvbGRlciwgc2l6ZSBpbiBbKCJkcmF3YWJsZS1tZHBpIiwyNCksKCJkcmF3YWJsZS1oZHBpIiwzNiksKCJkcmF3YWJsZS14aGRwaSIsNDgpLCgiZHJhd2FibGUteHhoZHBpIiw3MiksKCJkcmF3YWJsZS14eHhoZHBpIiw5NildOgogICAgcGF0aCA9IG9zLnBhdGguam9pbihiYXNlLCBmb2xkZXIpCiAgICBvcy5tYWtlZGlycyhwYXRoLCBleGlzdF9vaz1UcnVlKQogICAgaW1nID0gSW1hZ2UubmV3KCJSR0JBIiwoc2l6ZSxzaXplKSwoMCwwLDAsMCkpCiAgICBtID0gc2l6ZS8vNgogICAgSW1hZ2VEcmF3LkRyYXcoaW1nKS5lbGxpcHNlKFttLG0sc2l6ZS1tLTEsc2l6ZS1tLTFdLGZpbGw9KDI1NSwyNTUsMjU1LDI1NSkpCiAgICBpbWcuc2F2ZShvcy5wYXRoLmpvaW4ocGF0aCwiaWNfc3RhdF9pY29uLnBuZyIpKQpwcmludCgiSWNvbnMgZ2VuZXJhdGVkIikK" | base64 -d > /tmp/gen_icons.py
           python3 /tmp/gen_icons.py
 
       - name: Patch drawable references
@@ -62,16 +60,13 @@ jobs:
             fi
           done
 
-      - name: Make gradlew executable
-        run: chmod +x android/gradlew
-
       - name: Build debug APK
         run: cd android && ./gradlew assembleDebug --no-daemon
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
-      - name: Build release AAB (unsigned - for Codemagic signing)
+      - name: Build release AAB
         run: cd android && ./gradlew bundleRelease --no-daemon
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
