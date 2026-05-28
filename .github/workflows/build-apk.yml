@@ -107,11 +107,19 @@ jobs:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/tuktrack-upload.jks
+
       - name: Build release AAB
         run: cd android && ./gradlew bundleRelease --no-daemon
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+          CM_KEYSTORE_PATH: ${{ github.workspace }}/android/app/tuktrack-upload.jks
+          CM_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          CM_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          CM_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
