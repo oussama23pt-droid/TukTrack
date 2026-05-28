@@ -27,27 +27,13 @@ workflows:
           curl -fsSL "https://github.com/gradle/gradle/raw/v8.4.0/gradle/wrapper/gradle-wrapper.jar" \
             -o gradle/wrapper/gradle-wrapper.jar
 
-      - name: Set executable permission on gradlew
+      - name: Make gradlew executable
         script: chmod +x android/gradlew
-
-      - name: Inject signing config into build.gradle
-        script: |
-          # Codemagic exposes keystore via CM_KEYSTORE_PATH, CM_KEY_ALIAS,
-          # CM_KEYSTORE_PASSWORD, CM_KEY_PASSWORD environment variables.
-          # We inject a signingConfigs block into the app build.gradle so
-          # bundleRelease uses the keystore automatically.
-          GRADLE_FILE="android/app/build.gradle"
-          
-          # Add signingConfigs block after android { line
-          sed -i '/^android {/a\\n    signingConfigs {\n        release {\n            storeFile file(System.getenv("CM_KEYSTORE_PATH") ?: "")\n            storePassword System.getenv("CM_KEYSTORE_PASSWORD") ?: ""\n            keyAlias System.getenv("CM_KEY_ALIAS") ?: ""\n            keyPassword System.getenv("CM_KEY_PASSWORD") ?: ""\n        }\n    }' "$GRADLE_FILE"
-          
-          # Set release buildType to use signing config
-          sed -i '/buildTypes {/{n;/release {/a\\            signingConfig signingConfigs.release}' "$GRADLE_FILE" || true
 
       - name: Build release AAB
         script: |
           cd android
-          ./gradlew bundleRelease
+          ./gradlew bundleRelease --stacktrace
 
     artifacts:
       - android/app/build/outputs/bundle/release/app-release.aab
