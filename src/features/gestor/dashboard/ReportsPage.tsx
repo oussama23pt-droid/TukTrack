@@ -236,7 +236,7 @@ export default function ReportsPage() {
 
   const [isExporting, setIsExporting] = useState(false);
 
-  const exportToPDF = () => {
+  const exportToPDF = async () => {
     setIsExporting(true);
     try {
       const doc = new jsPDF();
@@ -314,12 +314,10 @@ export default function ReportsPage() {
       if (isAndroid && (window as any).AndroidBridge) {
         const bridge = (window as any).AndroidBridge;
         const base64 = doc.output('datauristring').split(',')[1];
-
         if (!bridge.hasStoragePermission()) {
           bridge.requestStoragePermission();
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
-
         const result = bridge.savePdfToDownloads(base64, filename);
         if (result === 'success') {
           alert(`PDF guardado em Downloads: ${filename}`);
