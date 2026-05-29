@@ -10,8 +10,6 @@ import { useAuth } from '../../auth/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 
 interface TripData {
   id: string;
@@ -310,40 +308,21 @@ export default function ReportsPage() {
         headStyles: { fillColor: [30, 41, 59] },
       });
 
-      
-
-      const blob = doc.output('blob');
       const filename = `Relatorio_Conta_${startDate}_${endDate}.pdf`;
+      const isAndroid = /Android/i.test(navigator.userAgent);
 
-      const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
-
-      if (isNative) {
-        const reader = new FileReader();
-        reader.readAsDataURL(blob);
-        reader.onloadend = async () => {
-          const base64 = (reader.result as string).split(',')[1];
-          const result = await Filesystem.writeFile({
-            path: filename,
-            data: base64,
-            directory: Directory.Cache,
-          });
-          await Share.share({
-            title: filename,
-            url: result.uri,
-            dialogTitle: 'Guardar ou partilhar PDF',
-          });
-        };
-      } else {
+      if (isAndroid) {
+        const base64 = doc.output('datauristring');
+        const byteString = atob(base64.split(',')[1]);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+        const blob = new Blob([ab], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        setTimeout(() => {
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-        }, 300);
+        window.location.href = url;
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      } else {
+        doc.save(filename);
       }
     } catch (error) {
       console.error('Error generating PDF:', error);
