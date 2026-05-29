@@ -5,8 +5,6 @@ const config: CapacitorConfig = {
   appName: 'TukTrack',
   webDir: 'dist',
   server: {
-    url: 'https://tuk-track.vercel.app',
-    cleartext: true,
     androidScheme: 'https',
   },
   android: {
@@ -14,7 +12,6 @@ const config: CapacitorConfig = {
     captureInput: true,
     webContentsDebuggingEnabled: false,
     backgroundColor: '#0f172a',
-    allowNavigation: ['blob:*'],
   },
   plugins: {
     BackgroundGeolocation: {
