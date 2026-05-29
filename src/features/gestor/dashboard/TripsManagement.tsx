@@ -260,34 +260,41 @@ export default function TripsManagement() {
       doc.text(`Faturação Total: ${totalRevenue.toFixed(2)}€`, 14, (doc as any).lastAutoTable.finalY + 22);
 
       const filename = `Relatorio_Viagens_${startDate}_${endDate}.pdf`;
-const blob = doc.output('blob');
-const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const blob = doc.output('blob');
 
-// Check if running in Median APK
-if ((window as any).median) {
-  const reader = new FileReader();
-  reader.readAsDataURL(blob);
-  reader.onloadend = () => {
-    (window as any).median.share.downloadFile({
-      url: reader.result,
-      filename: filename,
-      open: true
-    });
-  };
-} else if (isMobile) {
-  const mobileUrl = URL.createObjectURL(blob);
-  const mobileLink = document.createElement('a');
-  mobileLink.href = mobileUrl;
-  mobileLink.download = filename;
-  document.body.appendChild(mobileLink);
-  mobileLink.click();
-  setTimeout(() => {
-    document.body.removeChild(mobileLink);
-    URL.revokeObjectURL(mobileUrl);
-  }, 100);
-} else {
-  doc.save(filename);
-}
+      const reader = new FileReader();
+      reader.readAsDataURL(blob);
+      reader.onloadend = () => {
+        const base64 = (reader.result as string).split(',')[1];
+        if ((window as any).Capacitor && (window as any).Capacitor.isNativePlatform()) {
+          import('@capacitor/filesystem').then(({ Filesystem, Directory }) => {
+            Filesystem.writeFile({
+              path: filename,
+              data: base64,
+              directory: Directory.Cache,
+            }).then((result) => {
+              import('@capacitor/share').then(({ Share }) => {
+                Share.share({
+                  title: filename,
+                  url: result.uri,
+                  dialogTitle: 'Guardar ou partilhar PDF',
+                });
+              });
+            });
+          });
+        } else {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          setTimeout(() => {
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+          }, 100);
+        }
+      };
 } catch (error) {
   console.error('Error generating PDF:', error);
 } finally {
