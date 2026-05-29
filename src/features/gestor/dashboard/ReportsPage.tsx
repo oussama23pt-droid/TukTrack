@@ -311,16 +311,21 @@ export default function ReportsPage() {
       const filename = `Relatorio_Conta_${startDate}_${endDate}.pdf`;
       const isAndroid = /Android/i.test(navigator.userAgent);
 
-      if (isAndroid) {
-        const base64 = doc.output('datauristring');
-        const byteString = atob(base64.split(',')[1]);
-        const ab = new ArrayBuffer(byteString.length);
-        const ia = new Uint8Array(ab);
-        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
-        const blob = new Blob([ab], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        window.location.href = url;
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      if (isAndroid && (window as any).AndroidBridge) {
+        const bridge = (window as any).AndroidBridge;
+        const base64 = doc.output('datauristring').split(',')[1];
+
+        if (!bridge.hasStoragePermission()) {
+          bridge.requestStoragePermission();
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+
+        const result = bridge.savePdfToDownloads(base64, filename);
+        if (result === 'success') {
+          alert(`PDF guardado em Downloads: ${filename}`);
+        } else {
+          alert(`Erro ao guardar PDF: ${result}`);
+        }
       } else {
         doc.save(filename);
       }
