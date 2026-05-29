@@ -236,7 +236,7 @@ export default function ReportsPage() {
 
   const [isExporting, setIsExporting] = useState(false);
 
-  const exportToPDF = async () => {
+  const exportToPDF = () => {
     setIsExporting(true);
     try {
       const doc = new jsPDF();
@@ -310,36 +310,15 @@ export default function ReportsPage() {
 
       const filename = `Relatorio_Conta_${startDate}_${endDate}.pdf`;
 
-      // Wait for AndroidBridge to be ready (it loads async)
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const bridge = (window as any).AndroidBridge;
-      const isAndroid = /Android/i.test(navigator.userAgent);
-
-      if (bridge && typeof bridge.savePdfToDownloads === 'function') {
-        // Native Android app — save directly to Downloads
-        const base64 = doc.output('datauristring').split(',')[1];
-        if (typeof bridge.hasStoragePermission === 'function' && !bridge.hasStoragePermission()) {
-          bridge.requestStoragePermission();
-          await new Promise(resolve => setTimeout(resolve, 2500));
-        }
-        const result = bridge.savePdfToDownloads(base64, filename);
-        if (result === 'success') {
-          alert(`✅ PDF guardado em Downloads:\n${filename}`);
-        } else {
-          alert(`❌ Erro: ${result}`);
-        }
-      } else if (isAndroid) {
-        // Android browser fallback
-        const base64 = doc.output('datauristring');
-        const link = document.createElement('a');
-        link.href = base64;
-        link.download = filename;
-        link.click();
-      } else {
-        // Web / desktop
-        doc.save(filename);
-      }
+      const blob = doc.output('blob');
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
     } catch (error) {
       console.error('Error generating PDF:', error);
     } finally {
