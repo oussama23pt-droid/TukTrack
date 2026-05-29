@@ -4,10 +4,9 @@ const config: CapacitorConfig = {
   appId: 'com.tuktrack.app',
   appName: 'TukTrack',
   webDir: 'dist',
-  // ✅ server.url points to your live Vercel app.
-  // This means the APK loads the real deployed website — no localhost needed.
-  // This ONLY works if tuk-track.vercel.app is live and accessible.
   server: {
+    url: 'https://tuk-track.vercel.app',
+    cleartext: true,
     androidScheme: 'https',
   },
   android: {
@@ -15,6 +14,7 @@ const config: CapacitorConfig = {
     captureInput: true,
     webContentsDebuggingEnabled: false,
     backgroundColor: '#0f172a',
+    allowNavigation: ['blob:*'],
   },
   plugins: {
     BackgroundGeolocation: {
