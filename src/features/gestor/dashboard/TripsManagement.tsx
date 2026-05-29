@@ -216,7 +216,7 @@ export default function TripsManagement() {
     return matchesSearch && matchesDate;
   });
 
-  const exportToPDF = () => {
+  const exportToPDF = async () => {
     if (filteredTrips.length === 0) return;
     setIsExporting(true);
     try {
@@ -265,12 +265,10 @@ export default function TripsManagement() {
       if (isAndroid && (window as any).AndroidBridge) {
         const bridge = (window as any).AndroidBridge;
         const base64 = doc.output('datauristring').split(',')[1];
-
         if (!bridge.hasStoragePermission()) {
           bridge.requestStoragePermission();
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
-
         const result = bridge.savePdfToDownloads(base64, filename);
         if (result === 'success') {
           alert(`PDF guardado em Downloads: ${filename}`);
