@@ -102,7 +102,62 @@ class MainActivity : BridgeActivity() {
     inner class AndroidBridge {
 
         @JavascriptInterface
-        fun showAlertNotification(title: String, message: String, notifId: Int) {
+        fun savePdfToDownloads(base64Data: String, filename: String): String {
+            return try {
+                val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    // Android 10+ — use MediaStore, no permission needed
+                    val resolver = this@MainActivity.contentResolver
+                    val contentValues = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename)
+                        put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/pdf")
+                        put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+                    }
+                    val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                    if (uri != null) {
+                        resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                        contentValues.clear()
+                        contentValues.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                        resolver.update(uri, contentValues, null, null)
+                        "success"
+                    } else {
+                        "error:could not create file"
+                    }
+                } else {
+                    // Android 9 and below — write directly to Downloads folder
+                    val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                    downloadsDir.mkdirs()
+                    val file = java.io.File(downloadsDir, filename)
+                    java.io.FileOutputStream(file).use { it.write(bytes) }
+                    "success"
+                }
+            } catch (e: Exception) {
+                "error:${e.message}"
+            }
+        }
+
+        @JavascriptInterface
+        fun requestStoragePermission() {
+            if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.P) {
+                ActivityCompat.requestPermissions(
+                    this@MainActivity,
+                    arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                    1003
+                )
+            }
+        }
+
+        @JavascriptInterface
+        fun hasStoragePermission(): Boolean {
+            return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                true // Android 10+ doesn't need permission for Downloads via MediaStore
+            } else {
+                ContextCompat.checkSelfPermission(
+                    this@MainActivity,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                ) == PackageManager.PERMISSION_GRANTED
+            }
+        }
             try {
                 showAlertNotificationInternal(title, message, notifId)
             } catch (e: Exception) {
