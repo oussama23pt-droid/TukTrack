@@ -261,40 +261,16 @@ export default function TripsManagement() {
 
       const filename = `Relatorio_Viagens_${startDate}_${endDate}.pdf`;
       const blob = doc.output('blob');
-
-      const reader = new FileReader();
-      reader.readAsDataURL(blob);
-      reader.onloadend = () => {
-        const base64 = (reader.result as string).split(',')[1];
-        if ((window as any).Capacitor && (window as any).Capacitor.isNativePlatform()) {
-          import('@capacitor/filesystem').then(({ Filesystem, Directory }) => {
-            Filesystem.writeFile({
-              path: filename,
-              data: base64,
-              directory: Directory.Cache,
-            }).then((result) => {
-              import('@capacitor/share').then(({ Share }) => {
-                Share.share({
-                  title: filename,
-                  url: result.uri,
-                  dialogTitle: 'Guardar ou partilhar PDF',
-                });
-              });
-            });
-          });
-        } else {
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = filename;
-          document.body.appendChild(link);
-          link.click();
-          setTimeout(() => {
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-          }, 100);
-        }
-      };
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 300);
 } catch (error) {
   console.error('Error generating PDF:', error);
 } finally {
