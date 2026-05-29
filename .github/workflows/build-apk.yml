@@ -31,7 +31,7 @@ jobs:
         run: yes | sdkmanager --licenses || true
 
       - name: Install Android build tools
-        run: sdkmanager "build-tools;34.0.0" "platforms;android-34" || true
+        run: sdkmanager "build-tools;35.0.0" "platforms;android-35" || true
 
       - name: Install npm dependencies
         run: npm install
