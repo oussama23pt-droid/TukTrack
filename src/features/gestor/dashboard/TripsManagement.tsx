@@ -9,8 +9,6 @@ import { handleFirestoreError, sanitizeData } from '../../../lib/firestore-utils
 import RouteDesignerMap from '../../../components/RouteDesignerMap';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 import ConfirmationModal from '../../../components/ConfirmationModal';
 import { useNavigate } from 'react-router-dom';
 
@@ -262,36 +260,20 @@ export default function TripsManagement() {
       doc.text(`Faturação Total: ${totalRevenue.toFixed(2)}€`, 14, (doc as any).lastAutoTable.finalY + 22);
 
       const filename = `Relatorio_Viagens_${startDate}_${endDate}.pdf`;
-      const blob = doc.output('blob');
-      const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+      const isAndroid = /Android/i.test(navigator.userAgent);
 
-      if (isNative) {
-        const reader = new FileReader();
-        reader.readAsDataURL(blob);
-        reader.onloadend = async () => {
-          const base64 = (reader.result as string).split(',')[1];
-          const result = await Filesystem.writeFile({
-            path: filename,
-            data: base64,
-            directory: Directory.Cache,
-          });
-          await Share.share({
-            title: filename,
-            url: result.uri,
-            dialogTitle: 'Guardar ou partilhar PDF',
-          });
-        };
-      } else {
+      if (isAndroid) {
+        const base64 = doc.output('datauristring');
+        const byteString = atob(base64.split(',')[1]);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+        const blob = new Blob([ab], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        setTimeout(() => {
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-        }, 300);
+        window.location.href = url;
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      } else {
+        doc.save(filename);
       }
 } catch (error) {
   console.error('Error generating PDF:', error);
