@@ -9,6 +9,8 @@ import { handleFirestoreError, sanitizeData } from '../../../lib/firestore-utils
 import RouteDesignerMap from '../../../components/RouteDesignerMap';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import ConfirmationModal from '../../../components/ConfirmationModal';
 import { useNavigate } from 'react-router-dom';
 
@@ -261,16 +263,36 @@ export default function TripsManagement() {
 
       const filename = `Relatorio_Viagens_${startDate}_${endDate}.pdf`;
       const blob = doc.output('blob');
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => {
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      }, 300);
+      const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+
+      if (isNative) {
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = async () => {
+          const base64 = (reader.result as string).split(',')[1];
+          const result = await Filesystem.writeFile({
+            path: filename,
+            data: base64,
+            directory: Directory.Cache,
+          });
+          await Share.share({
+            title: filename,
+            url: result.uri,
+            dialogTitle: 'Guardar ou partilhar PDF',
+          });
+        };
+      } else {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        }, 300);
+      }
 } catch (error) {
   console.error('Error generating PDF:', error);
 } finally {
