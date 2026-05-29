@@ -8,8 +8,6 @@ const config: CapacitorConfig = {
   // This means the APK loads the real deployed website — no localhost needed.
   // This ONLY works if tuk-track.vercel.app is live and accessible.
   server: {
-    url: 'https://tuk-track.vercel.app',
-    cleartext: true,
     androidScheme: 'https',
   },
   android: {
