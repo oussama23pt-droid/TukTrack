@@ -309,22 +309,35 @@ export default function ReportsPage() {
       });
 
       const filename = `Relatorio_Conta_${startDate}_${endDate}.pdf`;
+
+      // Wait for AndroidBridge to be ready (it loads async)
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      const bridge = (window as any).AndroidBridge;
       const isAndroid = /Android/i.test(navigator.userAgent);
 
-      if (isAndroid && (window as any).AndroidBridge) {
-        const bridge = (window as any).AndroidBridge;
+      if (bridge && typeof bridge.savePdfToDownloads === 'function') {
+        // Native Android app — save directly to Downloads
         const base64 = doc.output('datauristring').split(',')[1];
-        if (!bridge.hasStoragePermission()) {
+        if (typeof bridge.hasStoragePermission === 'function' && !bridge.hasStoragePermission()) {
           bridge.requestStoragePermission();
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, 2500));
         }
         const result = bridge.savePdfToDownloads(base64, filename);
         if (result === 'success') {
-          alert(`PDF guardado em Downloads: ${filename}`);
+          alert(`✅ PDF guardado em Downloads:\n${filename}`);
         } else {
-          alert(`Erro ao guardar PDF: ${result}`);
+          alert(`❌ Erro: ${result}`);
         }
+      } else if (isAndroid) {
+        // Android browser fallback
+        const base64 = doc.output('datauristring');
+        const link = document.createElement('a');
+        link.href = base64;
+        link.download = filename;
+        link.click();
       } else {
+        // Web / desktop
         doc.save(filename);
       }
     } catch (error) {
